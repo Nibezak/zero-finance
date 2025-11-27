@@ -1,27 +1,28 @@
 'use client';
 
 import { PrivyProvider } from '@privy-io/react-auth';
-import { base } from 'viem/chains';
+import { base, mainnet, arbitrum } from 'viem/chains';
 import { ReactNode, useState } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ThemeProvider } from 'next-themes';
-import { WagmiProvider } from '@privy-io/wagmi';
-import { config as wagmiConfig } from '@/lib/wagmi';
+import { WagmiProvider, createConfig } from '@privy-io/wagmi';
+import { http } from 'wagmi';
 import { SmartWalletsProvider } from '@privy-io/react-auth/smart-wallets';
 import SuspendedPostHogPageView from './posthog-pageview';
+import { PostHogUserIdentification } from './posthog-user-identification';
 
-import posthog from 'posthog-js'
-import { PostHogProvider } from 'posthog-js/react'
+import posthog from 'posthog-js';
+import { PostHogProvider } from 'posthog-js/react';
 
 if (typeof window !== 'undefined') {
   posthog.init(process.env.NEXT_PUBLIC_POSTHOG_KEY, {
     api_host: process.env.NEXT_PUBLIC_POSTHOG_HOST,
-    capture_pageview: false // Disable automatic pageview capture, as we capture manually
-  })
+    capture_pageview: false, // Disable automatic pageview capture, as we capture manually
+  });
 }
 
 export function PHProvider({ children }: { children: ReactNode }) {
-  return <PostHogProvider client={posthog}>{children}</PostHogProvider>
+  return <PostHogProvider client={posthog}>{children}</PostHogProvider>;
 }
 
 // Create a client
@@ -54,6 +55,15 @@ function getQueryClient() {
   }
 }
 
+const wagmiConfig = createConfig({
+  chains: [base, mainnet, arbitrum],
+  transports: {
+    [base.id]: http(),
+    [mainnet.id]: http(),
+    [arbitrum.id]: http(),
+  },
+});
+
 export function Providers({ children }: { children: ReactNode }) {
   const privyAppId = process.env.NEXT_PUBLIC_PRIVY_APP_ID;
   const [queryClient] = useState(() => getQueryClient());
@@ -62,7 +72,7 @@ export function Providers({ children }: { children: ReactNode }) {
     console.error('Error: NEXT_PUBLIC_PRIVY_APP_ID is not set.');
     return <div>Privy App ID not configured.</div>;
   }
-  
+
   // PostHog is now initialised in app/instrumentation.client.ts. We only need to
   // ensure the provider is available so that the `usePostHog` hook works in
   // components.
@@ -73,20 +83,20 @@ export function Providers({ children }: { children: ReactNode }) {
       config={{
         appearance: {
           theme: 'light',
-          accentColor: '#676FFF',
-          logo: 'https://pygvfunuirngbnf5.public.blob.vercel-storage.com/eqwrt-LXxp514DL8VsT9jGXUrVy6ItfqEhje.png',
+          accentColor: '#0040FF',
+          logo: 'https://zerofinance.ai/new-logo-bluer.png',
         },
         externalWallets: {
-          coinbaseWallet: {
-            connectionOptions: 'smartWalletOnly',
-          },
+          coinbaseWallet: {},
         },
-        supportedChains: [base],
+        supportedChains: [base, arbitrum],
         defaultChain: base,
         embeddedWallets: {
-          // Create an embedded EOA for *every* user, even if they logged in with Metamask.
-          // This gives us a deterministic signer for the downstream smart‑wallet client.
-          createOnLogin: 'all-users',
+          ethereum: {
+            // Ensure a deterministic EOA exists so the AA smart wallet can be owned
+            // even if a user connects an external wallet first.
+            createOnLogin: 'all-users', // 'all-users' | 'users-without-wallets' | 'off'
+          },
         },
       }}
     >
@@ -95,6 +105,7 @@ export function Providers({ children }: { children: ReactNode }) {
           <WagmiProvider config={wagmiConfig}>
             <PHProvider>
               <SuspendedPostHogPageView />
+              <PostHogUserIdentification />
               {/* <ThemeProvider attribute="class" defaultTheme="dark" enableSystem> */}
               {children}
               {/* </ThemeProvider> */}

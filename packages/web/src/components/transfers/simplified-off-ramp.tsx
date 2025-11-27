@@ -9,16 +9,19 @@ import { Label } from '@/components/ui/label';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import {
   Loader2,
-  CircleDollarSign,
   ArrowRight,
   CheckCircle2,
   Banknote,
   Globe,
   Check,
   ArrowLeft,
-  User,
-  MapPin,
   Wallet,
+  Receipt,
+  DollarSign,
+  Euro,
+  Building2,
+  AlertCircle,
+  Coins,
 } from 'lucide-react';
 import {
   formatUnits,
@@ -32,28 +35,64 @@ import {
 import { erc20Abi } from 'viem';
 import { base } from 'viem/chains';
 import { toast } from 'sonner';
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-  CardDescription,
-} from '@/components/ui/card';
 import { useSmartWallets } from '@privy-io/react-auth/smart-wallets';
 import Safe from '@safe-global/protocol-kit';
 import { type Hex } from 'viem';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
-import { cn } from '@/lib/utils';
+import { cn, formatUsd } from '@/lib/utils';
 import { SAFE_ABI } from '@/lib/sponsor-tx/core';
-import { Progress } from '@/components/ui/progress';
 import { useSafeRelay } from '@/hooks/use-safe-relay';
 import { MetaTransactionData } from '@safe-global/safe-core-sdk-types';
 import { type UserFundingSourceDisplayData } from '@/actions/get-user-funding-sources';
-import { USDC_ADDRESS } from '@/lib/constants';
+import {
+  USDC_ADDRESS,
+  WETH_ADDRESS,
+  WETH_DECIMALS,
+  USDC_DECIMALS,
+} from '@/lib/constants';
+import { Combobox, type ComboboxOption } from '@/components/ui/combo-box';
+import { useBimodal, BlueprintGrid, Crosshairs } from '@/components/ui/bimodal';
 
-// --- Types and Schemas ---
+// Crypto asset configuration for technical mode transfers
+type CryptoAsset = 'usdc' | 'weth' | 'eth';
 
-// Define types locally instead of importing from tRPC
+interface CryptoAssetConfig {
+  symbol: string;
+  name: string;
+  address: Address | null; // null for native ETH
+  decimals: number;
+  icon: string;
+  isNative: boolean;
+}
+
+const CRYPTO_ASSETS: Record<CryptoAsset, CryptoAssetConfig> = {
+  usdc: {
+    symbol: 'USDC',
+    name: 'USD Coin',
+    address: USDC_ADDRESS as Address,
+    decimals: USDC_DECIMALS,
+    icon: '💵',
+    isNative: false,
+  },
+  weth: {
+    symbol: 'WETH',
+    name: 'Wrapped Ether',
+    address: WETH_ADDRESS as Address,
+    decimals: WETH_DECIMALS,
+    icon: '⟠',
+    isNative: false,
+  },
+  eth: {
+    symbol: 'ETH',
+    name: 'Ether',
+    address: null,
+    decimals: 18,
+    icon: '⟠',
+    isNative: true,
+  },
+};
+
+// Types remain the same...
 interface CreateOfframpTransferInput {
   type: 'manual';
   amount: string;
@@ -93,6 +132,357 @@ interface CreateOfframpTransferInput {
   bicSwift?: string;
 }
 
+function SimplifiedOffRampDemo({
+  fundingSources,
+  defaultValues,
+  prefillFromInvoice,
+}: SimplifiedOffRampInnerProps) {
+  const [amount, setAmount] = useState(
+    defaultValues?.amount ?? prefillFromInvoice?.amount ?? '10000',
+  );
+  const [destinationType, setDestinationType] = useState<
+    'ach' | 'iban' | 'external'
+  >('ach');
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [isComplete, setIsComplete] = useState(false);
+  const [step, setStep] = useState(1);
+
+  const achAccount = fundingSources.find(
+    (source) => source.sourceAccountType === 'us_ach',
+  );
+  const ibanAccount = fundingSources.find(
+    (source) => source.sourceAccountType === 'iban',
+  );
+
+  const processingSteps = [
+    'Verifying account details...',
+    'Initiating transfer...',
+    'Processing payment...',
+  ];
+
+  const handleTransfer = async () => {
+    setIsProcessing(true);
+
+    for (let i = 0; i < processingSteps.length; i += 1) {
+      setStep(i + 1);
+      // eslint-disable-next-line no-await-in-loop
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+    }
+
+    setIsProcessing(false);
+    setIsComplete(true);
+  };
+
+  const handleReset = () => {
+    setAmount(defaultValues?.amount ?? prefillFromInvoice?.amount ?? '10000');
+    setDestinationType('ach');
+    setIsComplete(false);
+    setStep(1);
+  };
+
+  if (isComplete) {
+    return (
+      <div className="bg-white">
+        <div className="border-b border-[#101010]/10 px-5 sm:px-6 py-4">
+          <p className="uppercase tracking-[0.14em] text-[11px] text-[#101010]/60">
+            TRANSFER COMPLETE
+          </p>
+        </div>
+        <div className="p-5 sm:p-6">
+          <div className="flex flex-col items-center justify-center py-8 space-y-6">
+            <div className="relative">
+              <div className="absolute inset-0 bg-green-500/20 rounded-full animate-ping" />
+              <CheckCircle2 className="relative h-12 w-12 text-green-500" />
+            </div>
+            <div className="text-center space-y-2">
+              <h3 className="text-[28px] sm:text-[32px] font-semibold tracking-[-0.01em] text-[#101010]">
+                Transfer initiated
+              </h3>
+              <p className="text-[14px] text-[#101010]/65 max-w-md">
+                Your transfer of {formatUsd(Number(amount || 0))} has been
+                successfully initiated. Funds will arrive in 1-2 business days.
+              </p>
+            </div>
+            <div className="w-full max-w-md bg-[#F7F7F2] border border-[#101010]/10 rounded-[12px] p-4">
+              <div className="space-y-3">
+                <div className="flex justify-between items-center">
+                  <span className="uppercase tracking-[0.14em] text-[11px] text-[#101010]/60">
+                    AMOUNT
+                  </span>
+                  <span className="text-[20px] font-semibold tabular-nums text-[#101010]">
+                    {formatUsd(Number(amount || 0))}
+                  </span>
+                </div>
+                <div className="border-t border-[#101010]/10 pt-3 space-y-2">
+                  <div className="flex justify-between text-[13px]">
+                    <span className="text-[#101010]/60">Destination</span>
+                    <span className="text-[#101010]">
+                      {destinationType === 'ach'
+                        ? 'USD Bank Account'
+                        : destinationType === 'iban'
+                          ? 'EUR Bank Account'
+                          : 'External Account'}
+                    </span>
+                  </div>
+                  <div className="flex justify-between text-[13px]">
+                    <span className="text-[#101010]/60">Reference</span>
+                    <span className="font-mono text-[12px] text-[#101010]">
+                      DEMO-{Date.now()}
+                    </span>
+                  </div>
+                  <div className="flex justify-between text-[13px]">
+                    <span className="text-[#101010]/60">Status</span>
+                    <span className="text-green-600 font-medium">
+                      Processing
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <Button
+              onClick={handleReset}
+              className="bg-[#1B29FF] hover:bg-[#1420CC] text-white px-6 py-2.5 text-[14px] font-medium transition-all"
+            >
+              Make Another Transfer
+            </Button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (isProcessing) {
+    return (
+      <div className="bg-white">
+        <div className="border-b border-[#101010]/10 px-5 sm:px-6 py-4">
+          <p className="uppercase tracking-[0.14em] text-[11px] text-[#101010]/60">
+            PROCESSING
+          </p>
+        </div>
+        <div className="p-5 sm:p-6">
+          <div className="flex flex-col items-center justify-center py-12 space-y-6">
+            <div className="relative">
+              <div className="absolute inset-0 bg-[#1B29FF]/20 rounded-full animate-ping" />
+              <div className="relative bg-[#1B29FF]/10 rounded-full p-4">
+                <Loader2 className="h-8 w-8 text-[#1B29FF] animate-spin" />
+              </div>
+            </div>
+            <div className="space-y-2 text-center">
+              <h3 className="text-[24px] sm:text-[28px] font-semibold tracking-[-0.01em] text-[#101010]">
+                Processing transfer
+              </h3>
+              <p className="text-[14px] text-[#1B29FF] animate-pulse">
+                {processingSteps[step - 1]}
+              </p>
+            </div>
+            <div className="w-full max-w-xs">
+              <div className="h-1 bg-[#101010]/10 rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-[#1B29FF] transition-all duration-500"
+                  style={{ width: `${(step / processingSteps.length) * 100}%` }}
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="bg-white">
+      <div className="border-b border-[#101010]/10 px-5 sm:px-6 py-4">
+        <p className="uppercase tracking-[0.14em] text-[11px] text-[#101010]/60 mb-2">
+          MOVE FUNDS
+        </p>
+        <h2 className="text-[22px] sm:text-[24px] font-semibold tracking-[-0.01em] text-[#101010]">
+          Transfer to bank account
+        </h2>
+      </div>
+      <div className="p-5 sm:p-6 space-y-5">
+        <div className="bg-[#F7F7F2] border border-[#101010]/10 rounded-[12px] p-4 sm:p-5">
+          <Label
+            htmlFor="demo-amount"
+            className="uppercase tracking-[0.14em] text-[11px] text-[#101010]/60 mb-3 block"
+          >
+            TRANSFER AMOUNT
+          </Label>
+          <div className="relative">
+            <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[#101010]/40" />
+            <Input
+              id="demo-amount"
+              type="number"
+              value={amount}
+              onChange={(e) => setAmount(e.target.value)}
+              className="pl-10 text-[20px] font-semibold tabular-nums h-12 border-[#101010]/10 bg-white"
+              placeholder="0.00"
+            />
+          </div>
+          <div className="mt-3 flex justify-between text-[12px]">
+            <span className="text-[#101010]/60">Available balance</span>
+            <span className="font-medium tabular-nums text-[#101010]">
+              {formatUsd(2500000)}
+            </span>
+          </div>
+        </div>
+
+        <div>
+          <Label className="uppercase tracking-[0.14em] text-[11px] text-[#101010]/60 mb-3 block">
+            SELECT DESTINATION
+          </Label>
+          <RadioGroup
+            value={destinationType}
+            onValueChange={(value: 'ach' | 'iban' | 'external') =>
+              setDestinationType(value)
+            }
+            className="space-y-3"
+          >
+            {achAccount && (
+              <label
+                htmlFor="demo-ach"
+                className="flex items-start gap-3 bg-white border border-[#101010]/10 rounded-[12px] p-4 hover:bg-[#F7F7F2]/50 transition-colors cursor-pointer"
+              >
+                <RadioGroupItem value="ach" id="demo-ach" className="mt-1" />
+                <div className="flex-1 flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="flex-shrink-0 w-10 h-10 bg-green-50 rounded-full flex items-center justify-center">
+                      <DollarSign className="h-5 w-5 text-green-600" />
+                    </div>
+                    <div>
+                      <p className="text-[14px] font-medium text-[#101010]">
+                        USD Bank Account
+                      </p>
+                      <p className="text-[12px] text-[#101010]/60">
+                        {achAccount.sourceBankName} • ****
+                        {achAccount.sourceAccountNumber?.slice(-4)}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-[11px] uppercase tracking-[0.14em] text-[#101010]/60">
+                      ACH
+                    </p>
+                    <p className="text-[12px] text-[#101010]/60">1-2 days</p>
+                  </div>
+                </div>
+              </label>
+            )}
+
+            {ibanAccount && (
+              <label
+                htmlFor="demo-iban"
+                className="flex items-start gap-3 bg-white border border-[#101010]/10 rounded-[12px] p-4 hover:bg-[#F7F7F2]/50 transition-colors cursor-pointer"
+              >
+                <RadioGroupItem value="iban" id="demo-iban" className="mt-1" />
+                <div className="flex-1 flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="flex-shrink-0 w-10 h-10 bg-blue-50 rounded-full flex items-center justify-center">
+                      <Euro className="h-5 w-5 text-blue-600" />
+                    </div>
+                    <div>
+                      <p className="text-[14px] font-medium text-[#101010]">
+                        EUR Bank Account
+                      </p>
+                      <p className="text-[12px] text-[#101010]/60">
+                        {ibanAccount.sourceBankName} •{' '}
+                        {ibanAccount.sourceIban?.slice(0, 4)}****
+                      </p>
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-[11px] uppercase tracking-[0.14em] text-[#101010]/60">
+                      SEPA
+                    </p>
+                    <p className="text-[12px] text-[#101010]/60">1-2 days</p>
+                  </div>
+                </div>
+              </label>
+            )}
+
+            <label
+              htmlFor="demo-external"
+              className="flex items-start gap-3 bg-white border border-[#101010]/10 rounded-[12px] p-4 hover:bg-[#F7F7F2]/50 transition-colors cursor-pointer"
+            >
+              <RadioGroupItem
+                value="external"
+                id="demo-external"
+                className="mt-1"
+              />
+              <div className="flex-1 flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="flex-shrink-0 w-10 h-10 bg-gray-50 rounded-full flex items-center justify-center">
+                    <Building2 className="h-5 w-5 text-gray-600" />
+                  </div>
+                  <div>
+                    <p className="text-[14px] font-medium text-[#101010]">
+                      External Account
+                    </p>
+                    <p className="text-[12px] text-[#101010]/60">
+                      Send to any bank account
+                    </p>
+                  </div>
+                </div>
+                <div className="text-right">
+                  <p className="text-[11px] uppercase tracking-[0.14em] text-[#101010]/60">
+                    WIRE
+                  </p>
+                  <p className="text-[12px] text-[#101010]/60">Same day</p>
+                </div>
+              </div>
+            </label>
+          </RadioGroup>
+        </div>
+
+        <div className="bg-[#FFF8E6] border border-[#FFA500]/20 rounded-[12px] p-4">
+          <div className="space-y-2">
+            <div className="flex justify-between text-[13px]">
+              <span className="text-[#101010]/60">Transfer amount</span>
+              <span className="tabular-nums text-[#101010]">
+                {formatUsd(Number(amount || 0))}
+              </span>
+            </div>
+            <div className="flex justify-between text-[13px]">
+              <span className="text-[#101010]/60">Processing fee</span>
+              <span className="tabular-nums text-[#101010]">$0.00</span>
+            </div>
+            <div className="border-t border-[#FFA500]/20 pt-2 flex justify-between">
+              <span className="text-[13px] font-medium text-[#101010]">
+                Total to receive
+              </span>
+              <span className="text-[18px] font-semibold tabular-nums text-[#101010]">
+                {formatUsd(Number(amount || 0))}
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <div className="text-center text-[11px] text-[#101010]/40 uppercase tracking-[0.14em]">
+          Demo Mode • No actual funds will be transferred
+        </div>
+
+        <Button
+          onClick={handleTransfer}
+          disabled={!amount || Number(amount) <= 0}
+          className="w-full bg-[#1B29FF] hover:bg-[#1420CC] text-white h-12 text-[14px] font-medium transition-all"
+        >
+          <span>Initiate Transfer</span>
+          <ArrowRight className="ml-2 h-4 w-4" />
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+export function SimplifiedOffRamp(props: SimplifiedOffRampProps) {
+  const { mode = 'real', ...rest } = props;
+
+  if (mode === 'demo') {
+    return <SimplifiedOffRampDemo {...rest} />;
+  }
+
+  return <SimplifiedOffRampReal {...rest} />;
+}
+
 interface AlignTransferCreatedResponse {
   alignTransferId: string;
   depositAmount: string;
@@ -101,7 +491,6 @@ interface AlignTransferCreatedResponse {
   status: string;
 }
 
-// Simplified type definition for the form
 interface OffRampFormValues {
   amount: string;
   destinationType: 'ach' | 'iban' | 'crypto';
@@ -120,6 +509,7 @@ interface OffRampFormValues {
   iban?: string;
   bic?: string;
   cryptoAddress?: string;
+  cryptoAsset?: CryptoAsset;
 }
 
 const erc20AbiBalanceOf = [
@@ -134,24 +524,84 @@ const erc20AbiBalanceOf = [
 
 const USDC_BASE_ADDRESS = USDC_ADDRESS as Address;
 
-// Helper function to build pre-validated signature for Safe
+// Country list
+const COUNTRIES: ComboboxOption[] = [
+  { value: 'US', label: 'United States' },
+  { value: 'GB', label: 'United Kingdom' },
+  { value: 'CA', label: 'Canada' },
+  { value: 'AU', label: 'Australia' },
+  { value: 'DE', label: 'Germany' },
+  { value: 'FR', label: 'France' },
+  { value: 'ES', label: 'Spain' },
+  { value: 'IT', label: 'Italy' },
+  { value: 'NL', label: 'Netherlands' },
+  { value: 'SE', label: 'Sweden' },
+  { value: 'CH', label: 'Switzerland' },
+  { value: 'JP', label: 'Japan' },
+  { value: 'SG', label: 'Singapore' },
+  { value: 'HK', label: 'Hong Kong' },
+  { value: 'BR', label: 'Brazil' },
+  { value: 'MX', label: 'Mexico' },
+].sort((a, b) => a.label.localeCompare(b.label));
+
 function buildPrevalidatedSig(owner: Address): Hex {
   return `0x000000000000000000000000${owner.slice(
     2,
   )}000000000000000000000000000000000000000000000000000000000000000001` as Hex;
 }
 
-export function SimplifiedOffRamp({
+type FundingSource = {
+  id: string;
+  accountType: 'us_ach' | 'iban' | 'uk_details' | 'other';
+  sourceAccountType?: 'us_ach' | 'iban' | 'uk_details' | 'other';
+  currency: string | null;
+  bankName: string | null;
+  sourceBankName?: string | null;
+  beneficiaryName: string | null;
+  sourceBankBeneficiaryName?: string | null;
+  accountHolder: string | null;
+  accountNumber: string | null;
+  sourceAccountNumber?: string | null;
+  routingNumber: string | null;
+  sourceRoutingNumber?: string | null;
+  iban: string | null;
+  sourceIban?: string | null;
+  bic: string | null;
+  sourceBicSwift?: string | null;
+  sourceBankAddress?: string | null;
+};
+
+type SimplifiedOffRampMode = 'demo' | 'real';
+
+interface SimplifiedOffRampProps {
+  fundingSources: FundingSource[] | UserFundingSourceDisplayData[];
+  defaultValues?: Partial<OffRampFormValues>;
+  prefillFromInvoice?: {
+    amount?: string;
+    currency?: string;
+    vendorName?: string | null;
+    description?: string | null;
+  };
+  mode?: SimplifiedOffRampMode;
+  maxBalance?: number;
+}
+
+type SimplifiedOffRampInnerProps = Omit<SimplifiedOffRampProps, 'mode'>;
+
+function SimplifiedOffRampReal({
   fundingSources,
-}: {
-  fundingSources: UserFundingSourceDisplayData[];
-}) {
+  prefillFromInvoice,
+  defaultValues,
+  maxBalance,
+}: SimplifiedOffRampInnerProps) {
   const [currentStep, setCurrentStep] = useState(0);
-  const [formStep, setFormStep] = useState(1); // 1: Transfer Type, 2: Amount & Details, 3: Confirm
+  const [formStep, setFormStep] = useState(1);
   const [isLoading, setIsLoading] = useState(false);
   const [loadingMessage, setLoadingMessage] = useState('Processing...');
   const [error, setError] = useState<string | null>(null);
   const [usdcBalance, setUsdcBalance] = useState<string | null>(null);
+  const [wethBalance, setWethBalance] = useState<string | null>(null);
+  const [ethBalance, setEthBalance] = useState<string | null>(null);
   const [isLoadingBalance, setIsLoadingBalance] = useState(false);
   const [transferDetails, setTransferDetails] =
     useState<AlignTransferCreatedResponse | null>(null);
@@ -162,6 +612,7 @@ export function SimplifiedOffRamp({
   const [cryptoTxHash, setCryptoTxHash] = useState<string | null>(null);
 
   const { client: smartClient } = useSmartWallets();
+  const { isTechnical } = useBimodal();
 
   const { data: fetchedPrimarySafeAddress, isLoading: isLoadingSafeAddress } =
     api.settings.userSafes.getPrimarySafeAddress.useQuery();
@@ -169,22 +620,39 @@ export function SimplifiedOffRamp({
   const { ready: isRelayReady, send: sendWithRelay } = useSafeRelay(
     primarySafeAddress || undefined,
   );
-  // Find bank account details from funding sources
+
+  const getAccountType = (source: any) =>
+    source.sourceAccountType || source.accountType;
+
   const achAccount = fundingSources.find(
-    (source) => source.sourceAccountType === 'us_ach',
+    (source) => getAccountType(source) === 'us_ach',
   );
   const ibanAccount = fundingSources.find(
-    (source) => source.sourceAccountType === 'iban',
+    (source) => getAccountType(source) === 'iban',
   );
-
-  // Check if user has any virtual accounts
-  const hasVirtualAccounts = achAccount || ibanAccount;
 
   useEffect(() => {
     if (fetchedPrimarySafeAddress) {
       setPrimarySafeAddress(fetchedPrimarySafeAddress as Address);
     }
   }, [fetchedPrimarySafeAddress]);
+
+  // Only default to crypto if technical mode AND no bank accounts
+  const shouldDefaultToCrypto = isTechnical && (!ibanAccount || !achAccount);
+
+  const mergedDefaultValues: Partial<OffRampFormValues> = {
+    destinationType: shouldDefaultToCrypto ? 'crypto' : 'ach',
+    accountHolderType: 'individual',
+    country: 'US',
+    city: '',
+    streetLine1: '',
+    streetLine2: '',
+    postalCode: '',
+    cryptoAddress: '',
+    cryptoAsset: 'usdc',
+    amount: prefillFromInvoice?.amount || '',
+    ...defaultValues,
+  };
 
   const {
     register,
@@ -195,23 +663,31 @@ export function SimplifiedOffRamp({
     formState: { errors },
     trigger,
   } = useForm<OffRampFormValues>({
-    defaultValues: {
-      destinationType: !ibanAccount || !achAccount ? 'crypto' : 'ach',
-      accountHolderType: 'individual',
-      country: '',
-      city: '',
-      streetLine1: '',
-      streetLine2: '',
-      postalCode: '',
-      cryptoAddress: '',
-    },
+    defaultValues: mergedDefaultValues,
   });
 
   const destinationType = watch('destinationType');
   const accountHolderType = watch('accountHolderType');
+  const cryptoAsset = watch('cryptoAsset') || 'usdc';
+
+  // Helper to get the balance for the selected crypto asset
+  const getSelectedAssetBalance = (): string | null => {
+    switch (cryptoAsset) {
+      case 'usdc':
+        return usdcBalance;
+      case 'weth':
+        return wethBalance;
+      case 'eth':
+        return ethBalance;
+      default:
+        return usdcBalance;
+    }
+  };
+
+  const selectedAssetConfig = CRYPTO_ASSETS[cryptoAsset];
 
   useEffect(() => {
-    const fetchBalance = async () => {
+    const fetchBalances = async () => {
       if (!primarySafeAddress) return;
       setIsLoadingBalance(true);
       try {
@@ -219,21 +695,40 @@ export function SimplifiedOffRamp({
           chain: base,
           transport: http(process.env.NEXT_PUBLIC_BASE_RPC_URL),
         });
-        const balance = await publicClient.readContract({
+
+        // Fetch USDC balance
+        const usdcBal = await publicClient.readContract({
           address: USDC_BASE_ADDRESS,
           abi: erc20AbiBalanceOf,
           functionName: 'balanceOf',
           args: [primarySafeAddress],
         });
-        setUsdcBalance(formatUnits(balance as bigint, 6));
+        setUsdcBalance(formatUnits(usdcBal as bigint, USDC_DECIMALS));
+
+        // Fetch WETH balance (only in technical mode)
+        if (isTechnical) {
+          const wethBal = await publicClient.readContract({
+            address: WETH_ADDRESS as Address,
+            abi: erc20AbiBalanceOf,
+            functionName: 'balanceOf',
+            args: [primarySafeAddress],
+          });
+          setWethBalance(formatUnits(wethBal as bigint, WETH_DECIMALS));
+
+          // Fetch native ETH balance
+          const ethBal = await publicClient.getBalance({
+            address: primarySafeAddress,
+          });
+          setEthBalance(formatUnits(ethBal, 18));
+        }
       } catch (err) {
-        toast.error('Could not fetch USDC balance.');
+        toast.error('Could not fetch balances.');
       } finally {
         setIsLoadingBalance(false);
       }
     };
-    fetchBalance();
-  }, [primarySafeAddress]);
+    fetchBalances();
+  }, [primarySafeAddress, isTechnical]);
 
   const createTransferMutation = api.align.createOfframpTransfer.useMutation({
     onSuccess: (data) => {
@@ -259,6 +754,8 @@ export function SimplifiedOffRamp({
       onSettled: () => setIsLoading(false),
     });
 
+  const isSubmittingTransfer = isLoading || createTransferMutation.isPending;
+
   const handleNextStep = async () => {
     let fieldsToValidate: (keyof OffRampFormValues)[] = [];
 
@@ -268,7 +765,7 @@ export function SimplifiedOffRamp({
       fieldsToValidate = ['amount'];
 
       if (destinationType === 'crypto') {
-        fieldsToValidate.push('cryptoAddress');
+        fieldsToValidate.push('cryptoAddress', 'cryptoAsset');
       } else {
         fieldsToValidate.push('accountHolderType', 'bankName');
 
@@ -312,41 +809,60 @@ export function SimplifiedOffRamp({
       return;
     }
 
+    const asset = values.cryptoAsset || 'usdc';
+    const assetConfig = CRYPTO_ASSETS[asset];
+
     setIsLoading(true);
     setError(null);
     setCryptoTxHash(null);
 
     try {
-      setLoadingMessage('Preparing crypto transfer...');
+      setLoadingMessage(`Preparing ${assetConfig.symbol} transfer...`);
 
-      const valueInUnits = parseUnits(values.amount, 6);
+      const valueInUnits = parseUnits(values.amount, assetConfig.decimals);
       if (valueInUnits <= 0n) {
         throw new Error('Amount must be greater than 0.');
       }
 
-      const transferData = encodeFunctionData({
-        abi: erc20Abi,
-        functionName: 'transfer',
-        args: [values.cryptoAddress as Address, valueInUnits],
-      });
+      let transactions: MetaTransactionData[];
 
-      const transactions: MetaTransactionData[] = [
-        {
-          to: USDC_BASE_ADDRESS,
-          value: '0',
-          data: transferData,
-        },
-      ];
+      if (assetConfig.isNative) {
+        // Native ETH transfer
+        transactions = [
+          {
+            to: values.cryptoAddress as Address,
+            value: valueInUnits.toString(),
+            data: '0x',
+          },
+        ];
+      } else {
+        // ERC20 token transfer (USDC, WETH)
+        const transferData = encodeFunctionData({
+          abi: erc20Abi,
+          functionName: 'transfer',
+          args: [values.cryptoAddress as Address, valueInUnits],
+        });
+
+        transactions = [
+          {
+            to: assetConfig.address!,
+            value: '0',
+            data: transferData,
+          },
+        ];
+      }
 
       setLoadingMessage('Sending transaction...');
       const txHash = await sendWithRelay(transactions);
       setCryptoTxHash(txHash);
       setCurrentStep(2);
-      toast.success('Crypto transfer completed successfully!');
+      toast.success(`${assetConfig.symbol} transfer completed successfully!`);
     } catch (err: any) {
       const errMsg = err.message || 'An unknown error occurred.';
-      setError(`Failed to send crypto transfer: ${errMsg}`);
-      toast.error('Crypto transfer failed', { description: errMsg });
+      setError(`Failed to send ${assetConfig.symbol} transfer: ${errMsg}`);
+      toast.error(`${assetConfig.symbol} transfer failed`, {
+        description: errMsg,
+      });
     } finally {
       setIsLoading(false);
     }
@@ -360,7 +876,6 @@ export function SimplifiedOffRamp({
       return;
     }
 
-    // Construct payload to match backend's expected schema
     const submissionPayload: CreateOfframpTransferInput = {
       type: 'manual',
       amount: values.amount,
@@ -369,7 +884,7 @@ export function SimplifiedOffRamp({
       destinationCurrency: values.destinationType === 'ach' ? 'usd' : 'eur',
       destinationPaymentRails:
         values.destinationType === 'ach' ? 'ach' : 'sepa',
-      destinationSelection: '--manual--', // Backend expects this field
+      destinationSelection: '--manual--',
       bankName: values.bankName,
       accountHolderType: values.accountHolderType,
       accountHolderFirstName: values.accountHolderFirstName,
@@ -381,10 +896,8 @@ export function SimplifiedOffRamp({
       streetLine2: values.streetLine2,
       postalCode: values.postalCode,
       accountType: values.destinationType === 'ach' ? 'us' : 'iban',
-      // ACH fields
       accountNumber: values.accountNumber,
       routingNumber: values.routingNumber,
-      // IBAN fields
       ibanNumber: values.iban,
       bicSwift: values.bic,
     };
@@ -469,100 +982,124 @@ export function SimplifiedOffRamp({
 
   if (isLoadingSafeAddress) {
     return (
-      <div className="flex justify-center items-center h-40">
-        <Loader2 className="h-8 w-8 animate-spin" />
+      <div className="bg-white flex justify-center items-center h-40">
+        <Loader2 className="h-8 w-8 animate-spin text-[#1B29FF]" />
       </div>
     );
   }
 
   if (!primarySafeAddress) {
     return (
-      <Alert variant="destructive">
-        <AlertTitle>Primary Account Not Found</AlertTitle>
-        <AlertDescription>
-          We could not find your primary account. Please set it up in settings
-          to proceed.
-        </AlertDescription>
-      </Alert>
+      <div className="bg-white border border-[#101010]/10 rounded-[12px] p-5 sm:p-6">
+        <Alert className="border-red-200 bg-red-50">
+          <AlertCircle className="h-4 w-4 text-red-600" />
+          <AlertTitle className="text-red-900">
+            Primary Account Not Found
+          </AlertTitle>
+          <AlertDescription className="text-red-700">
+            We could not find your primary account. Please set it up in settings
+            to proceed.
+          </AlertDescription>
+        </Alert>
+      </div>
     );
   }
 
+  // Success State
   if (currentStep === 2) {
     return (
-      <Card className="w-full max-w-lg mx-auto">
-        <CardContent className="flex flex-col items-center gap-6 py-12 text-center">
-          <CheckCircle2 className="h-16 w-16 text-green-500" />
-          <div>
-            <h2 className="text-2xl font-semibold">Transfer Processing</h2>
-            <p className="text-muted-foreground mt-2">
-              {cryptoTxHash
-                ? 'Your crypto transfer has been completed successfully.'
-                : 'Your funds are on their way to your bank account.'}
-            </p>
-          </div>
-          {(userOpHash || cryptoTxHash) && (
-            <a
-              href={`https://basescan.org/tx/${userOpHash || cryptoTxHash}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-xs text-muted-foreground hover:text-primary underline"
+      <div className="bg-white">
+        <div className="border-b border-[#101010]/10 px-5 sm:px-6 py-4">
+          <p className="uppercase tracking-[0.14em] text-[11px] text-[#101010]/60">
+            TRANSFER COMPLETE
+          </p>
+        </div>
+        <div className="p-5 sm:p-6">
+          <div className="flex flex-col items-center justify-center py-8 space-y-6">
+            <div className="relative">
+              <div className="absolute inset-0 bg-green-500/20 rounded-full animate-ping" />
+              <CheckCircle2 className="relative h-12 w-12 text-green-500" />
+            </div>
+            <div className="text-center space-y-2">
+              <h3 className="text-[28px] sm:text-[32px] font-semibold tracking-[-0.01em] text-[#101010]">
+                Transfer processing
+              </h3>
+              <p className="text-[14px] text-[#101010]/65 max-w-md">
+                {cryptoTxHash
+                  ? 'Your crypto transfer has been completed successfully.'
+                  : 'Your funds are on their way to your bank account.'}
+              </p>
+            </div>
+            {(userOpHash || cryptoTxHash) && (
+              <a
+                href={`https://basescan.org/tx/${userOpHash || cryptoTxHash}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-[12px] text-[#1B29FF] hover:text-[#1420CC] underline underline-offset-2"
+              >
+                Transaction Ref: {(userOpHash || cryptoTxHash)?.slice(0, 10)}...
+              </a>
+            )}
+            <Button
+              onClick={() => {
+                setCurrentStep(0);
+                setCryptoTxHash(null);
+                setUserOpHash(null);
+                setFormStep(1);
+              }}
+              className="bg-[#1B29FF] hover:bg-[#1420CC] text-white px-6 py-2.5 text-[14px] font-medium"
             >
-              Transaction Ref: {(userOpHash || cryptoTxHash)?.slice(0, 10)}...
-            </a>
-          )}
-          <Button
-            onClick={() => {
-              setCurrentStep(0);
-              setCryptoTxHash(null);
-              setUserOpHash(null);
-            }}
-            variant="outline"
-          >
-            Start another transfer
-          </Button>
-        </CardContent>
-      </Card>
+              Start Another Transfer
+            </Button>
+          </div>
+        </div>
+      </div>
     );
   }
 
+  // Confirmation State
   if (currentStep === 1) {
     return (
-      <Card className="w-full max-w-lg mx-auto">
-        <CardHeader>
-          <CardTitle>Confirm Transfer</CardTitle>
-          <CardDescription>
-            Review the details below and confirm to send the funds from your
-            account.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-6">
-          <div className="bg-blue-50 p-6 rounded-xl border border-blue-100 space-y-4">
-            <div className="flex justify-between items-center">
-              <span className="text-sm font-medium text-blue-700">
-                Amount to Send
-              </span>
-              <span className="text-lg font-bold text-blue-900">
-                {transferDetails?.depositAmount} USDC
-              </span>
-            </div>
-            <div className="flex justify-between items-center">
-              <span className="text-sm font-medium text-blue-700">Fee</span>
-              <span className="text-lg font-bold text-blue-900">
-                {transferDetails?.fee} USDC
-              </span>
-            </div>
-            <div className="flex justify-between items-center">
-              <span className="text-sm font-medium text-blue-700">Network</span>
-              <span className="text-lg font-bold text-blue-900">
-                {transferDetails?.depositNetwork.toUpperCase()}
-              </span>
+      <div className="bg-white">
+        <div className="border-b border-[#101010]/10 px-5 sm:px-6 py-4">
+          <p className="uppercase tracking-[0.14em] text-[11px] text-[#101010]/60 mb-2">
+            CONFIRM TRANSFER
+          </p>
+          <h2 className="text-[22px] sm:text-[24px] font-semibold tracking-[-0.01em] text-[#101010]">
+            Review transfer details
+          </h2>
+        </div>
+        <div className="p-5 sm:p-6 space-y-5">
+          <div className="bg-[#F7F7F2] border border-[#101010]/10 rounded-[12px] p-5">
+            <div className="space-y-4">
+              <div className="flex justify-between items-center">
+                <span className="uppercase tracking-[0.14em] text-[11px] text-[#101010]/60">
+                  AMOUNT TO SEND
+                </span>
+                <span className="text-[24px] font-semibold tabular-nums text-[#101010]">
+                  {transferDetails?.depositAmount} USDC
+                </span>
+              </div>
+              <div className="border-t border-[#101010]/10 pt-3 space-y-2">
+                <div className="flex justify-between text-[13px]">
+                  <span className="text-[#101010]/60">Processing Fee</span>
+                  <span className="tabular-nums text-[#101010]">
+                    {transferDetails?.fee} USDC
+                  </span>
+                </div>
+                <div className="flex justify-between text-[13px]">
+                  <span className="text-[#101010]/60">Network</span>
+                  <span className="text-[#101010]">
+                    {transferDetails?.depositNetwork.toUpperCase()}
+                  </span>
+                </div>
+              </div>
             </div>
           </div>
           <Button
             onClick={handleSendFunds}
             disabled={isLoading}
-            className="w-full bg-blue-600 hover:bg-blue-700"
-            size="lg"
+            className="w-full bg-[#1B29FF] hover:bg-[#1420CC] text-white h-12 text-[14px] font-medium transition-all"
           >
             {isLoading ? (
               <>
@@ -570,39 +1107,74 @@ export function SimplifiedOffRamp({
                 {loadingMessage}
               </>
             ) : (
-              'Confirm & Send'
+              <>
+                Confirm & Send
+                <ArrowRight className="ml-2 h-4 w-4" />
+              </>
             )}
           </Button>
-        </CardContent>
-      </Card>
+        </div>
+      </div>
     );
   }
 
+  // Main Form
   return (
-    <Card className="w-full max-w-lg mx-auto shadow-lg">
-      <CardHeader className="bg-gray-50 rounded-t-lg">
-        <CardDescription className="text-blue-700 text-lg font-medium">
-          Step {formStep} of 3 -{' '}
+    <div className="bg-white">
+      {/* Header */}
+      <div className="border-b border-[#101010]/10 px-5 sm:px-6 py-4">
+        {prefillFromInvoice && (
+          <div className="mb-4 bg-[#FFF8E6] border border-[#FFA500]/20 rounded-[12px] p-3">
+            <div className="flex items-start gap-3">
+              <Receipt className="h-5 w-5 text-[#FFA500] flex-shrink-0 mt-0.5" />
+              <div>
+                <p className="text-[13px] font-medium text-[#101010] mb-1">
+                  Payment for Invoice
+                </p>
+                <div className="text-[12px] text-[#101010]/70 space-y-0.5">
+                  {prefillFromInvoice.vendorName && (
+                    <p>Vendor: {prefillFromInvoice.vendorName}</p>
+                  )}
+                  {prefillFromInvoice.amount && (
+                    <p>
+                      Amount: {formatUsd(Number(prefillFromInvoice.amount))}
+                    </p>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+        <p className="uppercase tracking-[0.14em] text-[11px] text-[#101010]/60 mb-2">
+          STEP {formStep} OF 3
+        </p>
+        <h2 className="text-[22px] sm:text-[24px] font-semibold tracking-[-0.01em] text-[#101010]">
           {formStep === 1
             ? 'Select Transfer Method'
             : formStep === 2
-              ? 'Enter Amount and Details'
+              ? 'Enter Transfer Details'
               : 'Review and Confirm'}
-        </CardDescription>
-        <Progress value={(formStep / 3) * 100} className="mt-2" />
-      </CardHeader>
-      <CardContent className="p-6 max-h-[70vh] overflow-y-auto">
+        </h2>
+        <div className="mt-3 h-1 bg-[#101010]/10 rounded-full overflow-hidden">
+          <div
+            className="h-full bg-[#1B29FF] transition-all duration-500"
+            style={{ width: `${(formStep / 3) * 100}%` }}
+          />
+        </div>
+      </div>
+
+      {/* Form Content */}
+      <div className="p-5 sm:p-6">
         <form
           onSubmit={handleSubmit(handleInitiateSubmit)}
-          className="space-y-6"
+          className="space-y-5"
         >
-          {/* Step 1: Transfer Method Selection */}
+          {/* Step 1: Transfer Method */}
           {formStep === 1 && (
-            <div className="space-y-6">
-              {/* Destination Type Selection */}
-              <div className="space-y-3">
-                <Label className="text-sm font-semibold text-gray-700">
-                  Transfer Method
+            <div className="space-y-5">
+              <div>
+                <Label className="uppercase tracking-[0.14em] text-[11px] text-[#101010]/60 mb-3 block">
+                  SELECT DESTINATION
                 </Label>
                 <Controller
                   control={control}
@@ -610,167 +1182,140 @@ export function SimplifiedOffRamp({
                   render={({ field }) => (
                     <RadioGroup
                       onValueChange={field.onChange}
-                      // if no iban or no ach, set crypto as default
-                      //  the below doesn't seem to work why
                       value={
                         !ibanAccount || !achAccount ? 'crypto' : field.value
                       }
-                      className="grid grid-cols-1 sm:grid-cols-3 gap-2 sm:gap-3"
+                      className="grid grid-cols-1 sm:grid-cols-3 gap-3"
                     >
-                      <div className="relative">
+                      <label
+                        htmlFor="ach"
+                        className={cn(
+                          'relative flex flex-col items-center justify-center bg-white border-2 rounded-[12px] p-4 sm:p-6 cursor-pointer transition-all',
+                          destinationType === 'ach'
+                            ? 'border-[#1B29FF] bg-[#1B29FF]/5'
+                            : 'border-[#101010]/10 hover:bg-[#F7F7F2]/50',
+                          !achAccount && 'opacity-50 cursor-not-allowed',
+                        )}
+                      >
                         <RadioGroupItem
                           value="ach"
                           id="ach"
-                          className="peer sr-only"
+                          className="sr-only"
                           disabled={!achAccount}
                         />
-                        <Label
-                          htmlFor="ach"
-                          className={cn(
-                            'flex flex-col items-center justify-center rounded-xl border-2 p-4 sm:p-6 cursor-pointer transition-all duration-200',
-                            'hover:bg-blue-50 hover:border-blue-300',
-                            destinationType === 'ach'
-                              ? 'bg-blue-100 border-blue-500 shadow-md'
-                              : 'bg-white border-gray-200',
-                          )}
-                        >
-                          <Banknote
+                        <div className="flex-shrink-0 w-12 h-12 bg-green-50 rounded-full flex items-center justify-center mb-3">
+                          <DollarSign
                             className={cn(
-                              'mb-3 h-8 w-8 transition-colors',
+                              'h-6 w-6',
                               destinationType === 'ach'
-                                ? 'text-blue-600'
-                                : 'text-gray-400',
+                                ? 'text-green-600'
+                                : 'text-green-400',
                             )}
                           />
-                          <span
-                            className={cn(
-                              'font-medium transition-colors',
-                              destinationType === 'ach'
-                                ? 'text-blue-900'
-                                : 'text-gray-600',
-                            )}
-                          >
-                            US Bank
-                          </span>
-                          <span
-                            className={cn(
-                              'text-xs mt-1 transition-colors',
-                              destinationType === 'ach'
-                                ? 'text-blue-700'
-                                : 'text-gray-400',
-                            )}
-                          >
-                            ACH Transfer
-                          </span>
-                          {destinationType === 'ach' && (
-                            <Check className="absolute top-2 right-2 h-5 w-5 text-blue-600" />
-                          )}
-                        </Label>
-                      </div>
-                      <div className="relative">
+                        </div>
+                        <span className="font-medium text-[14px] text-[#101010]">
+                          US Bank
+                        </span>
+                        <span className="text-[11px] uppercase tracking-[0.14em] text-[#101010]/60 mt-1">
+                          ACH Transfer
+                        </span>
+                        {destinationType === 'ach' && (
+                          <Check className="absolute top-3 right-3 h-5 w-5 text-[#1B29FF]" />
+                        )}
+                      </label>
+
+                      <label
+                        htmlFor="iban"
+                        className={cn(
+                          'relative flex flex-col items-center justify-center bg-white border-2 rounded-[12px] p-4 sm:p-6 cursor-pointer transition-all',
+                          destinationType === 'iban'
+                            ? 'border-[#1B29FF] bg-[#1B29FF]/5'
+                            : 'border-[#101010]/10 hover:bg-[#F7F7F2]/50',
+                          !ibanAccount && 'opacity-50 cursor-not-allowed',
+                        )}
+                      >
                         <RadioGroupItem
                           value="iban"
                           id="iban"
-                          className="peer sr-only"
+                          className="sr-only"
                           disabled={!ibanAccount}
                         />
-                        <Label
-                          htmlFor="iban"
-                          className={cn(
-                            'flex flex-col items-center justify-center rounded-xl border-2 p-4 sm:p-6 cursor-pointer transition-all duration-200',
-                            'hover:bg-blue-50 hover:border-blue-300',
-                            destinationType === 'iban'
-                              ? 'bg-blue-100 border-blue-500 shadow-md'
-                              : 'bg-white border-gray-200',
-                          )}
-                        >
-                          <Globe
+                        <div className="flex-shrink-0 w-12 h-12 bg-blue-50 rounded-full flex items-center justify-center mb-3">
+                          <Euro
                             className={cn(
-                              'mb-3 h-8 w-8 transition-colors',
+                              'h-6 w-6',
                               destinationType === 'iban'
                                 ? 'text-blue-600'
-                                : 'text-gray-400',
+                                : 'text-blue-400',
                             )}
                           />
-                          <span
-                            className={cn(
-                              'font-medium transition-colors',
-                              destinationType === 'iban'
-                                ? 'text-blue-900'
-                                : 'text-gray-600',
-                            )}
-                          >
-                            EU
-                          </span>
-                          <span
-                            className={cn(
-                              'text-xs mt-1 transition-colors',
-                              destinationType === 'iban'
-                                ? 'text-blue-700'
-                                : 'text-gray-400',
-                            )}
-                          >
-                            IBAN/SEPA
-                          </span>
-                          {destinationType === 'iban' && (
-                            <Check className="absolute top-2 right-2 h-5 w-5 text-blue-600" />
-                          )}
-                        </Label>
-                      </div>
-                      <div className="relative">
-                        <RadioGroupItem
-                          value="crypto"
-                          id="crypto"
-                          className="peer sr-only"
-                        />
-                        <Label
+                        </div>
+                        <span className="font-medium text-[14px] text-[#101010]">
+                          EU Bank
+                        </span>
+                        <span className="text-[11px] uppercase tracking-[0.14em] text-[#101010]/60 mt-1">
+                          SEPA Transfer
+                        </span>
+                        {destinationType === 'iban' && (
+                          <Check className="absolute top-3 right-3 h-5 w-5 text-[#1B29FF]" />
+                        )}
+                      </label>
+
+                      {/* Crypto option - only visible in technical mode */}
+                      {isTechnical && (
+                        <label
                           htmlFor="crypto"
                           className={cn(
-                            'flex flex-col items-center justify-center rounded-xl border-2 p-4 sm:p-6 cursor-pointer transition-all duration-200',
-                            'hover:bg-blue-50 hover:border-blue-300',
+                            'relative flex flex-col items-center justify-center border-2 rounded-sm p-4 sm:p-6 cursor-pointer transition-all overflow-hidden',
                             destinationType === 'crypto'
-                              ? 'bg-blue-100 border-blue-500 shadow-md'
-                              : 'bg-white border-gray-200',
+                              ? 'border-[#1B29FF] bg-white'
+                              : 'border-[#1B29FF]/20 hover:border-[#1B29FF]/40 bg-white',
                           )}
                         >
-                          <Wallet
-                            className={cn(
-                              'mb-3 h-8 w-8 transition-colors',
-                              destinationType === 'crypto'
-                                ? 'text-blue-600'
-                                : 'text-gray-400',
-                            )}
-                          />
-                          <span
-                            className={cn(
-                              'font-medium transition-colors',
-                              destinationType === 'crypto'
-                                ? 'text-blue-900'
-                                : 'text-gray-600',
-                            )}
-                          >
-                            Crypto
-                          </span>
-                          <span
-                            className={cn(
-                              'text-xs mt-1 transition-colors',
-                              destinationType === 'crypto'
-                                ? 'text-blue-700'
-                                : 'text-gray-400',
-                            )}
-                          >
-                            USDC Transfer
-                          </span>
+                          {/* Blueprint grid for technical mode */}
+                          <BlueprintGrid className="opacity-50" />
+
+                          {/* Crosshairs */}
                           {destinationType === 'crypto' && (
-                            <Check className="absolute top-2 right-2 h-5 w-5 text-blue-600" />
+                            <>
+                              <Crosshairs position="top-left" />
+                              <Crosshairs position="top-right" />
+                            </>
                           )}
-                        </Label>
-                      </div>
+
+                          <RadioGroupItem
+                            value="crypto"
+                            id="crypto"
+                            className="sr-only"
+                          />
+                          <div className="relative z-10 flex flex-col items-center">
+                            <div className="flex-shrink-0 w-12 h-12 bg-[#1B29FF]/10 rounded-sm flex items-center justify-center mb-3">
+                              <Coins
+                                className={cn(
+                                  'h-6 w-6',
+                                  destinationType === 'crypto'
+                                    ? 'text-[#1B29FF]'
+                                    : 'text-[#1B29FF]/60',
+                                )}
+                              />
+                            </div>
+                            <span className="font-mono font-medium text-[14px] text-[#101010]">
+                              Crypto
+                            </span>
+                            <span className="font-mono text-[10px] uppercase tracking-wider text-[#1B29FF] mt-1">
+                              MULTI_ASSET
+                            </span>
+                          </div>
+                          {destinationType === 'crypto' && (
+                            <Check className="absolute top-3 right-3 h-5 w-5 text-[#1B29FF] z-10" />
+                          )}
+                        </label>
+                      )}
                     </RadioGroup>
                   )}
                 />
                 {errors.destinationType && (
-                  <p className="text-xs text-red-500 mt-1">
+                  <p className="text-[12px] text-red-500 mt-2">
                     {errors.destinationType.message}
                   </p>
                 )}
@@ -780,8 +1325,7 @@ export function SimplifiedOffRamp({
                 type="button"
                 onClick={handleNextStep}
                 disabled={!destinationType}
-                className="w-full h-12 bg-blue-600 hover:bg-blue-700 text-white font-medium"
-                size="lg"
+                className="w-full bg-[#1B29FF] hover:bg-[#1420CC] text-white h-12 text-[14px] font-medium transition-all"
               >
                 Continue
                 <ArrowRight className="ml-2 h-4 w-4" />
@@ -789,18 +1333,19 @@ export function SimplifiedOffRamp({
             </div>
           )}
 
-          {/* Step 2: Account Details */}
+          {/* Step 2: Bank Transfer Details */}
           {formStep === 2 && destinationType !== 'crypto' && (
-            <div className="space-y-6">
-              {/* Amount */}
-              <div className="space-y-2">
+            <div className="space-y-5">
+              {/* Amount Input */}
+              <div className="bg-[#F7F7F2] border border-[#101010]/10 rounded-[12px] p-4 sm:p-5">
                 <Label
                   htmlFor="amount"
-                  className="text-sm font-medium text-gray-700"
+                  className="uppercase tracking-[0.14em] text-[11px] text-[#101010]/60 mb-3 block"
                 >
-                  Amount (USDC)
+                  TRANSFER AMOUNT
                 </Label>
                 <div className="relative">
+                  <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[#101010]/40" />
                   <Input
                     id="amount"
                     {...register('amount', {
@@ -809,449 +1354,370 @@ export function SimplifiedOffRamp({
                         const num = parseFloat(value);
                         if (isNaN(num) || num <= 0)
                           return 'Please enter a valid positive amount.';
-                        if (usdcBalance && num > parseFloat(usdcBalance))
+                        const availableBalance =
+                          maxBalance !== undefined
+                            ? maxBalance
+                            : usdcBalance
+                              ? parseFloat(usdcBalance)
+                              : null;
+                        if (availableBalance !== null && num > availableBalance)
                           return 'Amount exceeds your available balance.';
                         return true;
                       },
                     })}
                     placeholder="0.00"
-                    className="border-2 focus:border-blue-500 focus:ring-blue-500/20 pr-28"
+                    className="pl-10 text-[20px] font-semibold tabular-nums h-12 border-[#101010]/10 bg-white"
                   />
                   {isLoadingBalance ? (
                     <div className="absolute inset-y-0 right-0 pr-3 flex items-center">
-                      <Loader2 className="h-4 w-4 animate-spin text-gray-400" />
+                      <Loader2 className="h-4 w-4 animate-spin text-[#101010]/40" />
                     </div>
                   ) : (
-                    usdcBalance !== null && (
+                    (maxBalance !== undefined ? maxBalance : usdcBalance) !==
+                      null && (
                       <button
                         type="button"
-                        onClick={() =>
-                          setValue('amount', usdcBalance, {
-                            shouldValidate: true,
-                          })
-                        }
-                        className="absolute inset-y-0 right-0 pr-3 flex items-center text-sm text-blue-600 hover:text-blue-800"
+                        onClick={() => {
+                          const balance =
+                            maxBalance !== undefined
+                              ? maxBalance.toString()
+                              : usdcBalance;
+                          if (balance) {
+                            setValue('amount', balance, {
+                              shouldValidate: true,
+                            });
+                          }
+                        }}
+                        className="absolute inset-y-0 right-0 pr-3 flex items-center text-[12px] text-[#1B29FF] hover:text-[#1420CC]"
                       >
-                        Max: {parseFloat(usdcBalance).toFixed(4)}
+                        Max:{' '}
+                        {maxBalance !== undefined
+                          ? maxBalance.toFixed(2)
+                          : parseFloat(usdcBalance || '0').toFixed(4)}
                       </button>
                     )
                   )}
                 </div>
+                <div className="mt-3 flex justify-between text-[12px]">
+                  <span className="text-[#101010]/60">Available balance</span>
+                  <span className="font-medium tabular-nums text-[#101010]">
+                    {maxBalance !== undefined
+                      ? formatUsd(maxBalance)
+                      : usdcBalance
+                        ? `${parseFloat(usdcBalance).toFixed(2)} USDC`
+                        : '—'}
+                  </span>
+                </div>
                 {errors.amount && (
-                  <p className="text-xs text-red-500 mt-1">
+                  <p className="text-[12px] text-red-500 mt-2">
                     {errors.amount.message}
                   </p>
                 )}
               </div>
-              {/* Account Holder Type */}
-              <div className="space-y-2">
-                <Label className="text-sm font-medium text-gray-700">
-                  Account Holder Type
-                </Label>
-                <Controller
-                  control={control}
-                  name="accountHolderType"
-                  render={({ field }) => (
-                    <RadioGroup
-                      onValueChange={field.onChange}
-                      value={field.value}
-                      className="flex flex-col sm:flex-row gap-3 sm:gap-6"
-                    >
-                      <div className="flex items-center space-x-2">
-                        <RadioGroupItem value="individual" id="individual" />
-                        <Label htmlFor="individual">Individual</Label>
-                      </div>
-                      <div className="flex items-center space-x-2">
-                        <RadioGroupItem value="business" id="business" />
-                        <Label htmlFor="business">Business</Label>
-                      </div>
-                    </RadioGroup>
-                  )}
-                />
-              </div>
 
-              {/* Account Holder Name */}
-              {accountHolderType === 'individual' && (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label
-                      htmlFor="accountHolderFirstName"
-                      className="text-sm font-medium text-gray-700"
-                    >
-                      First Name
-                    </Label>
-                    <Input
-                      id="accountHolderFirstName"
-                      {...register('accountHolderFirstName', {
-                        required: 'First name is required',
-                      })}
-                      placeholder="John"
-                      className="border-2 focus:border-blue-500 focus:ring-blue-500/20"
-                    />
-                    {errors.accountHolderFirstName && (
-                      <p className="text-xs text-red-500 mt-1">
-                        {errors.accountHolderFirstName.message}
-                      </p>
+              {/* Account Details Card */}
+              <div className="bg-white border border-[#101010]/10 rounded-[12px] p-4 sm:p-5 space-y-4">
+                <p className="uppercase tracking-[0.14em] text-[11px] text-[#101010]/60">
+                  ACCOUNT DETAILS
+                </p>
+
+                {/* Account Holder Type */}
+                <div>
+                  <Label className="text-[13px] font-medium text-[#101010] mb-2 block">
+                    Account Holder Type
+                  </Label>
+                  <Controller
+                    control={control}
+                    name="accountHolderType"
+                    render={({ field }) => (
+                      <RadioGroup
+                        onValueChange={field.onChange}
+                        value={field.value}
+                        className="flex gap-3"
+                      >
+                        <label className="flex items-center gap-2 cursor-pointer">
+                          <RadioGroupItem value="individual" id="individual" />
+                          <span className="text-[13px] text-[#101010]">
+                            Individual
+                          </span>
+                        </label>
+                        <label className="flex items-center gap-2 cursor-pointer">
+                          <RadioGroupItem value="business" id="business" />
+                          <span className="text-[13px] text-[#101010]">
+                            Business
+                          </span>
+                        </label>
+                      </RadioGroup>
                     )}
-                  </div>
-                  <div className="space-y-2">
-                    <Label
-                      htmlFor="accountHolderLastName"
-                      className="text-sm font-medium text-gray-700"
-                    >
-                      Last Name
-                    </Label>
-                    <Input
-                      id="accountHolderLastName"
-                      {...register('accountHolderLastName', {
-                        required: 'Last name is required',
-                      })}
-                      placeholder="Doe"
-                      className="border-2 focus:border-blue-500 focus:ring-blue-500/20"
-                    />
-                    {errors.accountHolderLastName && (
-                      <p className="text-xs text-red-500 mt-1">
-                        {errors.accountHolderLastName.message}
-                      </p>
-                    )}
-                  </div>
+                  />
                 </div>
-              )}
 
-              {accountHolderType === 'business' && (
-                <div className="space-y-2">
+                {/* Name Fields */}
+                {accountHolderType === 'individual' && (
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <Label
+                        htmlFor="accountHolderFirstName"
+                        className="text-[13px] font-medium text-[#101010] mb-1 block"
+                      >
+                        First Name
+                      </Label>
+                      <Input
+                        id="accountHolderFirstName"
+                        {...register('accountHolderFirstName', {
+                          required: 'First name is required',
+                        })}
+                        placeholder="John"
+                        className="h-10 border-[#101010]/10"
+                      />
+                      {errors.accountHolderFirstName && (
+                        <p className="text-[11px] text-red-500 mt-1">
+                          {errors.accountHolderFirstName.message}
+                        </p>
+                      )}
+                    </div>
+                    <div>
+                      <Label
+                        htmlFor="accountHolderLastName"
+                        className="text-[13px] font-medium text-[#101010] mb-1 block"
+                      >
+                        Last Name
+                      </Label>
+                      <Input
+                        id="accountHolderLastName"
+                        {...register('accountHolderLastName', {
+                          required: 'Last name is required',
+                        })}
+                        placeholder="Doe"
+                        className="h-10 border-[#101010]/10"
+                      />
+                      {errors.accountHolderLastName && (
+                        <p className="text-[11px] text-red-500 mt-1">
+                          {errors.accountHolderLastName.message}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {accountHolderType === 'business' && (
+                  <div>
+                    <Label
+                      htmlFor="accountHolderBusinessName"
+                      className="text-[13px] font-medium text-[#101010] mb-1 block"
+                    >
+                      Business Name
+                    </Label>
+                    <Input
+                      id="accountHolderBusinessName"
+                      {...register('accountHolderBusinessName', {
+                        required: 'Business name is required',
+                      })}
+                      placeholder="Acme Corp"
+                      className="h-10 border-[#101010]/10"
+                    />
+                    {errors.accountHolderBusinessName && (
+                      <p className="text-[11px] text-red-500 mt-1">
+                        {errors.accountHolderBusinessName.message}
+                      </p>
+                    )}
+                  </div>
+                )}
+
+                {/* Bank Name */}
+                <div>
                   <Label
-                    htmlFor="accountHolderBusinessName"
-                    className="text-sm font-medium text-gray-700"
+                    htmlFor="bankName"
+                    className="text-[13px] font-medium text-[#101010] mb-1 block"
                   >
-                    Business Name
+                    Bank Name
                   </Label>
                   <Input
-                    id="accountHolderBusinessName"
-                    {...register('accountHolderBusinessName', {
-                      required: 'Business name is required',
+                    id="bankName"
+                    {...register('bankName', {
+                      required: 'Bank name is required',
                     })}
-                    placeholder="Acme Corp"
-                    className="border-2 focus:border-blue-500 focus:ring-blue-500/20"
+                    placeholder="Chase Bank"
+                    className="h-10 border-[#101010]/10"
                   />
-                  {errors.accountHolderBusinessName && (
-                    <p className="text-xs text-red-500 mt-1">
-                      {errors.accountHolderBusinessName.message}
+                  {errors.bankName && (
+                    <p className="text-[11px] text-red-500 mt-1">
+                      {errors.bankName.message}
                     </p>
                   )}
                 </div>
-              )}
 
-              {/* Bank Name */}
-              <div className="space-y-2">
-                <Label
-                  htmlFor="bankName"
-                  className="text-sm font-medium text-gray-700"
-                >
-                  Bank Name
-                </Label>
-                <Input
-                  id="bankName"
-                  {...register('bankName', {
-                    required: 'Bank name is required',
-                  })}
-                  placeholder="Capital One"
-                  required
-                  className="border-2 focus:border-blue-500 focus:ring-blue-500/20"
-                />
-                {errors.bankName && (
-                  <p className="text-xs text-red-500 mt-1">
-                    {errors.bankName.message}
-                  </p>
+                {/* Account Numbers */}
+                {destinationType === 'ach' && (
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <Label
+                        htmlFor="accountNumber"
+                        className="text-[13px] font-medium text-[#101010] mb-1 block"
+                      >
+                        Account Number
+                      </Label>
+                      <Input
+                        id="accountNumber"
+                        {...register('accountNumber', {
+                          required: 'Account number is required',
+                        })}
+                        placeholder="123456789"
+                        className="h-10 border-[#101010]/10"
+                      />
+                      {errors.accountNumber && (
+                        <p className="text-[11px] text-red-500 mt-1">
+                          {errors.accountNumber.message}
+                        </p>
+                      )}
+                    </div>
+                    <div>
+                      <Label
+                        htmlFor="routingNumber"
+                        className="text-[13px] font-medium text-[#101010] mb-1 block"
+                      >
+                        Routing Number
+                      </Label>
+                      <Input
+                        id="routingNumber"
+                        {...register('routingNumber', {
+                          required: 'Routing number is required',
+                        })}
+                        placeholder="021000021"
+                        className="h-10 border-[#101010]/10"
+                      />
+                      {errors.routingNumber && (
+                        <p className="text-[11px] text-red-500 mt-1">
+                          {errors.routingNumber.message}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {destinationType === 'iban' && (
+                  <div className="space-y-3">
+                    <div>
+                      <Label
+                        htmlFor="iban"
+                        className="text-[13px] font-medium text-[#101010] mb-1 block"
+                      >
+                        IBAN
+                      </Label>
+                      <Input
+                        id="iban"
+                        {...register('iban', { required: 'IBAN is required' })}
+                        placeholder="DE89370400440532013000"
+                        className="h-10 border-[#101010]/10 font-mono text-[12px]"
+                      />
+                      {errors.iban && (
+                        <p className="text-[11px] text-red-500 mt-1">
+                          {errors.iban.message}
+                        </p>
+                      )}
+                    </div>
+                    <div>
+                      <Label
+                        htmlFor="bic"
+                        className="text-[13px] font-medium text-[#101010] mb-1 block"
+                      >
+                        BIC/SWIFT
+                      </Label>
+                      <Input
+                        id="bic"
+                        {...register('bic', {
+                          required: 'BIC/SWIFT is required',
+                        })}
+                        placeholder="COBADEFFXXX"
+                        className="h-10 border-[#101010]/10 font-mono text-[12px]"
+                      />
+                      {errors.bic && (
+                        <p className="text-[11px] text-red-500 mt-1">
+                          {errors.bic.message}
+                        </p>
+                      )}
+                    </div>
+                  </div>
                 )}
               </div>
 
-              {/* Account Details */}
-              {destinationType === 'ach' && (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label
-                      htmlFor="accountNumber"
-                      className="text-sm font-medium text-gray-700"
-                    >
-                      Account Number
-                    </Label>
-                    <Input
-                      id="accountNumber"
-                      {...register('accountNumber', {
-                        required: 'Account number is required',
-                      })}
-                      placeholder="123456789"
-                      className="border-2 focus:border-blue-500 focus:ring-blue-500/20"
-                    />
-                    {errors.accountNumber && (
-                      <p className="text-xs text-red-500 mt-1">
-                        {errors.accountNumber.message}
-                      </p>
-                    )}
-                  </div>
-                  <div className="space-y-2">
-                    <Label
-                      htmlFor="routingNumber"
-                      className="text-sm font-medium text-gray-700"
-                    >
-                      Routing Number
-                    </Label>
-                    <Input
-                      id="routingNumber"
-                      {...register('routingNumber', {
-                        required: 'Routing number is required',
-                      })}
-                      placeholder="021000021"
-                      className="border-2 focus:border-blue-500 focus:ring-blue-500/20"
-                    />
-                    {errors.routingNumber && (
-                      <p className="text-xs text-red-500 mt-1">
-                        {errors.routingNumber.message}
-                      </p>
-                    )}
-                  </div>
-                </div>
-              )}
-
-              {destinationType === 'iban' && (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label
-                      htmlFor="iban"
-                      className="text-sm font-medium text-gray-700"
-                    >
-                      IBAN
-                    </Label>
-                    <Input
-                      id="iban"
-                      {...register('iban', { required: 'IBAN is required' })}
-                      placeholder="DE89370400440532013000"
-                      className="border-2 focus:border-blue-500 focus:ring-blue-500/20"
-                    />
-                    {errors.iban && (
-                      <p className="text-xs text-red-500 mt-1">
-                        {errors.iban.message}
-                      </p>
-                    )}
-                  </div>
-                  <div className="space-y-2">
-                    <Label
-                      htmlFor="bic"
-                      className="text-sm font-medium text-gray-700"
-                    >
-                      BIC/SWIFT
-                    </Label>
-                    <Input
-                      id="bic"
-                      {...register('bic', {
-                        required: 'BIC/SWIFT is required',
-                      })}
-                      placeholder="COBADEFFXXX"
-                      className="border-2 focus:border-blue-500 focus:ring-blue-500/20"
-                    />
-                    {errors.bic && (
-                      <p className="text-xs text-red-500 mt-1">
-                        {errors.bic.message}
-                      </p>
-                    )}
-                  </div>
-                </div>
-              )}
-
               {/* Address Details */}
-              <div className="space-y-2 pt-4 border-t">
-                <Label className="text-sm font-medium text-gray-700">
-                  Beneficiary Address
-                </Label>
-                {/* Street line 1 */}
+              <div className="bg-white border border-[#101010]/10 rounded-[12px] p-4 sm:p-5 space-y-4">
+                <p className="uppercase tracking-[0.14em] text-[11px] text-[#101010]/60">
+                  BENEFICIARY ADDRESS
+                </p>
+
                 <Input
                   id="streetLine1"
-                  placeholder="123 Main St"
+                  placeholder="Street address"
                   {...register('streetLine1', {
                     required: 'Street address is required',
                   })}
-                  className="border-2 focus:border-blue-500 focus:ring-blue-500/20"
+                  className="h-10 border-[#101010]/10"
                 />
                 {errors.streetLine1 && (
-                  <p className="text-xs text-red-500 mt-1">
+                  <p className="text-[11px] text-red-500 -mt-2">
                     {errors.streetLine1.message}
                   </p>
                 )}
 
-                {/* Street line 2 (optional) */}
                 <Input
                   id="streetLine2"
                   placeholder="Apartment, suite, etc. (optional)"
                   {...register('streetLine2')}
-                  className="border-2 focus:border-blue-500 focus:ring-blue-500/20 mt-2"
+                  className="h-10 border-[#101010]/10"
                 />
 
-                {/* City & Postal in grid */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
-                  <div className="space-y-1">
-                    <Label
-                      htmlFor="city"
-                      className="text-sm font-medium text-gray-700"
-                    >
-                      City
-                    </Label>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
                     <Input
                       id="city"
-                      placeholder="New York"
+                      placeholder="City"
                       {...register('city', { required: 'City is required' })}
-                      className="border-2 focus:border-blue-500 focus:ring-blue-500/20"
+                      className="h-10 border-[#101010]/10"
                     />
                     {errors.city && (
-                      <p className="text-xs text-red-500 mt-1">
+                      <p className="text-[11px] text-red-500 mt-1">
                         {errors.city.message}
                       </p>
                     )}
                   </div>
-                  <div className="space-y-1">
-                    <Label
-                      htmlFor="postalCode"
-                      className="text-sm font-medium text-gray-700"
-                    >
-                      Postal / ZIP
-                    </Label>
+                  <div>
                     <Input
                       id="postalCode"
-                      placeholder="10001"
+                      placeholder="ZIP / Postal Code"
                       {...register('postalCode', {
                         required: 'Postal code is required',
                       })}
-                      className="border-2 focus:border-blue-500 focus:ring-blue-500/20"
+                      className="h-10 border-[#101010]/10"
                     />
                     {errors.postalCode && (
-                      <p className="text-xs text-red-500 mt-1">
+                      <p className="text-[11px] text-red-500 mt-1">
                         {errors.postalCode.message}
                       </p>
                     )}
                   </div>
                 </div>
 
-                {/* Country */}
-                <div className="space-y-1 mt-4">
-                  <Label
-                    htmlFor="country"
-                    className="text-sm font-medium text-gray-700"
-                  >
-                    Country
-                  </Label>
-                  <Input
-                    id="country"
-                    placeholder="United States"
-                    {...register('country', {
-                      required: 'Country is required',
-                    })}
-                    className="border-2 focus:border-blue-500 focus:ring-blue-500/20"
-                  />
-                  {errors.country && (
-                    <p className="text-xs text-red-500 mt-1">
-                      {errors.country.message}
-                    </p>
+                <Controller
+                  control={control}
+                  name="country"
+                  rules={{ required: 'Country is required' }}
+                  render={({ field }) => (
+                    <Combobox
+                      options={COUNTRIES}
+                      value={field.value}
+                      onChange={field.onChange}
+                      placeholder="Select country..."
+                      searchPlaceholder="Search countries..."
+                      emptyPlaceholder="No country found."
+                      triggerClassName="h-10 border-[#101010]/10"
+                    />
                   )}
-                </div>
-              </div>
-
-              <div className="flex gap-3">
-                <Button
-                  type="button"
-                  onClick={handlePreviousStep}
-                  variant="outline"
-                  className="flex-1"
-                >
-                  <ArrowLeft className="mr-2 h-4 w-4" />
-                  Back
-                </Button>
-                <Button
-                  type="button"
-                  onClick={handleNextStep}
-                  className="flex-1 bg-blue-600 hover:bg-blue-700 text-white"
-                >
-                  Continue
-                  <ArrowRight className="ml-2 h-4 w-4" />
-                </Button>
-              </div>
-            </div>
-          )}
-
-          {/* Step 2: Crypto Transfer Details */}
-          {formStep === 2 && destinationType === 'crypto' && (
-            <div className="space-y-6">
-              <div className="space-y-2">
-                <Label
-                  htmlFor="amount"
-                  className="text-sm font-medium text-gray-700"
-                >
-                  Amount (USDC)
-                </Label>
-                <div className="relative">
-                  <Input
-                    id="amount"
-                    {...register('amount', {
-                      required: 'Amount is required',
-                      validate: (value) => {
-                        const num = parseFloat(value);
-                        if (isNaN(num) || num <= 0)
-                          return 'Please enter a valid positive amount.';
-                        if (usdcBalance && num > parseFloat(usdcBalance))
-                          return 'Amount exceeds your available balance.';
-                        return true;
-                      },
-                    })}
-                    placeholder="0.00"
-                    className="border-2 focus:border-blue-500 focus:ring-blue-500/20 pr-28"
-                  />
-                  {isLoadingBalance ? (
-                    <div className="absolute inset-y-0 right-0 pr-3 flex items-center">
-                      <Loader2 className="h-4 w-4 animate-spin text-gray-400" />
-                    </div>
-                  ) : (
-                    usdcBalance !== null && (
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setValue('amount', usdcBalance, {
-                            shouldValidate: true,
-                          })
-                        }
-                        className="absolute inset-y-0 right-0 pr-3 flex items-center text-sm text-blue-600 hover:text-blue-800"
-                      >
-                        Max: {parseFloat(usdcBalance).toFixed(4)}
-                      </button>
-                    )
-                  )}
-                </div>
-                {errors.amount && (
-                  <p className="text-xs text-red-500 mt-1">
-                    {errors.amount.message}
-                  </p>
-                )}
-              </div>
-
-              <div className="space-y-2">
-                <Label
-                  htmlFor="cryptoAddress"
-                  className="text-sm font-medium text-gray-700"
-                >
-                  Recipient Address (Base Network)
-                </Label>
-                <Input
-                  id="cryptoAddress"
-                  {...register('cryptoAddress', {
-                    required: 'Recipient address is required.',
-                    validate: (value) =>
-                      (value && isAddress(value as string)) ||
-                      'Invalid wallet address format.',
-                  })}
-                  placeholder="0x..."
-                  className="border-2 focus:border-blue-500 focus:ring-blue-500/20"
                 />
-                {errors.cryptoAddress && (
-                  <p className="text-xs text-red-500 mt-1">
-                    {errors.cryptoAddress.message}
+                {errors.country && (
+                  <p className="text-[11px] text-red-500 -mt-2">
+                    {errors.country.message}
                   </p>
                 )}
               </div>
@@ -1261,7 +1727,7 @@ export function SimplifiedOffRamp({
                   type="button"
                   onClick={handlePreviousStep}
                   variant="outline"
-                  className="flex-1"
+                  className="flex-1 h-11 border-[#101010]/10 hover:bg-[#F7F7F2]/50"
                 >
                   <ArrowLeft className="mr-2 h-4 w-4" />
                   Back
@@ -1269,7 +1735,7 @@ export function SimplifiedOffRamp({
                 <Button
                   type="button"
                   onClick={handleNextStep}
-                  className="flex-1 bg-blue-600 hover:bg-blue-700 text-white"
+                  className="flex-1 bg-[#1B29FF] hover:bg-[#1420CC] text-white h-11 text-[14px] font-medium"
                 >
                   Continue
                   <ArrowRight className="ml-2 h-4 w-4" />
@@ -1278,196 +1744,376 @@ export function SimplifiedOffRamp({
             </div>
           )}
 
-          {/* Step 3: Confirmation */}
+          {/* Step 2: Crypto Transfer - Technical/Blueprint Mode */}
+          {formStep === 2 && destinationType === 'crypto' && (
+            <div className="space-y-5">
+              {/* Asset Selection - Blueprint Style */}
+              <div className="relative bg-white border border-[#1B29FF]/20 rounded-sm overflow-hidden">
+                <BlueprintGrid className="opacity-30" />
+                <Crosshairs position="top-left" />
+                <Crosshairs position="top-right" />
+
+                <div className="relative z-10">
+                  {/* Header */}
+                  <div className="flex justify-between items-center px-4 py-2 border-b border-[#1B29FF]/10 bg-[#F7F7F2]/50">
+                    <span className="font-mono text-[10px] text-[#1B29FF] tracking-wider uppercase">
+                      SELECT_ASSET
+                    </span>
+                    <span className="font-mono text-[10px] text-[#101010]/50">
+                      CHAIN::BASE
+                    </span>
+                  </div>
+
+                  {/* Asset Grid */}
+                  <div className="p-4">
+                    <Controller
+                      control={control}
+                      name="cryptoAsset"
+                      render={({ field }) => (
+                        <RadioGroup
+                          onValueChange={field.onChange}
+                          value={field.value || 'usdc'}
+                          className="grid grid-cols-3 gap-3"
+                        >
+                          {(
+                            Object.entries(CRYPTO_ASSETS) as [
+                              CryptoAsset,
+                              CryptoAssetConfig,
+                            ][]
+                          ).map(([key, asset]) => {
+                            const balance =
+                              key === 'usdc'
+                                ? usdcBalance
+                                : key === 'weth'
+                                  ? wethBalance
+                                  : ethBalance;
+                            const isSelected = field.value === key;
+
+                            return (
+                              <label
+                                key={key}
+                                htmlFor={`asset-${key}`}
+                                className={cn(
+                                  'relative flex flex-col items-center justify-center border rounded-sm p-3 cursor-pointer transition-all',
+                                  isSelected
+                                    ? 'border-[#1B29FF] bg-[#1B29FF]/5'
+                                    : 'border-[#1B29FF]/20 hover:border-[#1B29FF]/40 bg-white',
+                                )}
+                              >
+                                <RadioGroupItem
+                                  value={key}
+                                  id={`asset-${key}`}
+                                  className="sr-only"
+                                />
+                                <span className="text-xl mb-1">
+                                  {asset.icon}
+                                </span>
+                                <span className="font-mono text-[12px] font-medium text-[#101010]">
+                                  {asset.symbol}
+                                </span>
+                                <span className="font-mono text-[10px] text-[#101010]/50 tabular-nums">
+                                  {balance
+                                    ? parseFloat(balance).toFixed(4)
+                                    : '0.0000'}
+                                </span>
+                                {isSelected && (
+                                  <Check className="absolute top-1 right-1 h-3 w-3 text-[#1B29FF]" />
+                                )}
+                              </label>
+                            );
+                          })}
+                        </RadioGroup>
+                      )}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Amount Input - Blueprint Style */}
+              <div className="relative bg-white border border-[#1B29FF]/20 rounded-sm overflow-hidden">
+                <BlueprintGrid className="opacity-30" />
+
+                <div className="relative z-10">
+                  <div className="flex justify-between items-center px-4 py-2 border-b border-[#1B29FF]/10 bg-[#F7F7F2]/50">
+                    <span className="font-mono text-[10px] text-[#1B29FF] tracking-wider uppercase">
+                      AMOUNT::{selectedAssetConfig.symbol}
+                    </span>
+                    <span className="font-mono text-[10px] text-[#101010]/50">
+                      DECIMALS::{selectedAssetConfig.decimals}
+                    </span>
+                  </div>
+
+                  <div className="p-4">
+                    <div className="relative">
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 font-mono text-[12px] text-[#1B29FF] pointer-events-none z-10 bg-white pr-1">
+                        {selectedAssetConfig.symbol}
+                      </span>
+                      <Input
+                        id="amount"
+                        {...register('amount', {
+                          required: 'Amount is required',
+                          validate: (value) => {
+                            const num = parseFloat(value);
+                            if (isNaN(num) || num <= 0)
+                              return 'Please enter a valid positive amount.';
+                            const availableBalance = getSelectedAssetBalance();
+                            if (
+                              availableBalance !== null &&
+                              num > parseFloat(availableBalance)
+                            )
+                              return 'Amount exceeds your available balance.';
+                            return true;
+                          },
+                        })}
+                        placeholder="0.00"
+                        className="pl-14 pr-24 text-[20px] font-mono font-semibold tabular-nums h-12 border-[#1B29FF]/20 bg-white rounded-sm"
+                      />
+                      {getSelectedAssetBalance() !== null && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const balance = getSelectedAssetBalance();
+                            if (balance) {
+                              setValue('amount', balance, {
+                                shouldValidate: true,
+                              });
+                            }
+                          }}
+                          className="absolute inset-y-0 right-0 pr-3 flex items-center font-mono text-[10px] text-[#1B29FF] hover:text-[#1420CC] bg-white pl-1"
+                        >
+                          MAX::
+                          {parseFloat(getSelectedAssetBalance() || '0').toFixed(
+                            2,
+                          )}
+                        </button>
+                      )}
+                    </div>
+                    {errors.amount && (
+                      <p className="font-mono text-[11px] text-red-500 mt-2">
+                        {errors.amount.message}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* Recipient Address - Blueprint Style */}
+              <div className="relative bg-white border border-[#1B29FF]/20 rounded-sm overflow-hidden">
+                <BlueprintGrid className="opacity-30" />
+
+                <div className="relative z-10">
+                  <div className="flex justify-between items-center px-4 py-2 border-b border-[#1B29FF]/10 bg-[#F7F7F2]/50">
+                    <span className="font-mono text-[10px] text-[#1B29FF] tracking-wider uppercase">
+                      DESTINATION_ADDRESS
+                    </span>
+                    <span className="font-mono text-[10px] text-[#101010]/50">
+                      FORMAT::EVM
+                    </span>
+                  </div>
+
+                  <div className="p-4">
+                    <Input
+                      id="cryptoAddress"
+                      {...register('cryptoAddress', {
+                        required: 'Recipient address is required.',
+                        validate: (value) =>
+                          (value && isAddress(value as string)) ||
+                          'Invalid wallet address format.',
+                      })}
+                      placeholder="0x..."
+                      className="h-12 border-[#1B29FF]/20 font-mono text-[13px] rounded-sm"
+                    />
+                    {errors.cryptoAddress && (
+                      <p className="font-mono text-[11px] text-red-500 mt-2">
+                        {errors.cryptoAddress.message}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex gap-3">
+                <Button
+                  type="button"
+                  onClick={handlePreviousStep}
+                  variant="outline"
+                  className="flex-1 h-11 border-[#1B29FF]/20 hover:bg-[#1B29FF]/5 font-mono rounded-sm"
+                >
+                  <ArrowLeft className="mr-2 h-4 w-4" />
+                  BACK
+                </Button>
+                <Button
+                  type="button"
+                  onClick={handleNextStep}
+                  className="flex-1 bg-[#1B29FF] hover:bg-[#1420CC] text-white h-11 text-[14px] font-mono font-medium rounded-sm"
+                >
+                  CONTINUE
+                  <ArrowRight className="ml-2 h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {/* Step 3: Review */}
           {formStep === 3 && (
-            <div className="space-y-6">
-              <div className="space-y-4">
-                <h3 className="text-lg font-medium text-gray-900">
-                  Review Transfer Details
-                </h3>
+            <div className="relative">
+              {isSubmittingTransfer && (
+                <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 rounded-[12px] bg-white/85 backdrop-blur-sm">
+                  <Loader2 className="h-5 w-5 animate-spin text-[#1B29FF]" />
+                  <p className="text-[13px] text-[#101010]/70">
+                    {isLoading ? loadingMessage : 'Submitting transfer...'}
+                  </p>
+                </div>
+              )}
 
-                <div className="bg-gray-50 rounded-lg p-4 space-y-3">
-                  <div className="flex justify-between">
-                    <span className="text-sm text-gray-600">
-                      Transfer Type:
-                    </span>
-                    <span className="text-sm font-medium">
-                      {destinationType === 'ach'
-                        ? 'ACH Transfer'
-                        : destinationType === 'iban'
-                          ? 'IBAN Transfer'
-                          : 'Crypto Transfer'}
-                    </span>
-                  </div>
+              <div
+                className={cn(
+                  'space-y-5',
+                  isSubmittingTransfer && 'pointer-events-none opacity-40',
+                )}
+              >
+                <div className="bg-[#F7F7F2] border border-[#101010]/10 rounded-[12px] p-5">
+                  <p className="uppercase tracking-[0.12em] text-[11px] text-[#101010]/60 mb-4">
+                    Transfer summary
+                  </p>
+                  <div className="space-y-3">
+                    <div className="flex justify-between items-center">
+                      <span
+                        className={cn(
+                          'text-[13px] text-[#101010]/60',
+                          destinationType === 'crypto' &&
+                            'font-mono text-[11px]',
+                        )}
+                      >
+                        {destinationType === 'crypto' ? 'TYPE' : 'Type'}
+                      </span>
+                      <span
+                        className={cn(
+                          'text-[13px] font-medium text-[#101010]',
+                          destinationType === 'crypto' && 'font-mono',
+                        )}
+                      >
+                        {destinationType === 'ach'
+                          ? 'ACH transfer'
+                          : destinationType === 'iban'
+                            ? 'SEPA transfer'
+                            : `${selectedAssetConfig.symbol} Transfer`}
+                      </span>
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <span
+                        className={cn(
+                          'text-[13px] text-[#101010]/60',
+                          destinationType === 'crypto' &&
+                            'font-mono text-[11px]',
+                        )}
+                      >
+                        {destinationType === 'crypto' ? 'AMOUNT' : 'Amount'}
+                      </span>
+                      <span
+                        className={cn(
+                          'text-[18px] font-semibold tabular-nums text-[#101010]',
+                          destinationType === 'crypto' && 'font-mono',
+                        )}
+                      >
+                        {watch('amount')}{' '}
+                        {destinationType === 'crypto'
+                          ? selectedAssetConfig.symbol
+                          : 'USDC'}
+                      </span>
+                    </div>
 
-                  <div className="flex justify-between">
-                    <span className="text-sm text-gray-600">Amount:</span>
-                    <span className="text-sm font-medium">
-                      {watch('amount')} USDC
-                    </span>
-                  </div>
-
-                  {destinationType === 'ach' && (
-                    <>
-                      <div className="flex justify-between">
-                        <span className="text-sm text-gray-600">
-                          Account Holder:
-                        </span>
-                        <span className="text-sm font-medium">
-                          {accountHolderType === 'individual'
-                            ? `${watch('accountHolderFirstName')} ${watch('accountHolderLastName')}`
-                            : watch('accountHolderBusinessName')}
-                        </span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-sm text-gray-600">
-                          Account Number:
-                        </span>
-                        <span className="text-sm font-medium font-mono">
-                          ****{watch('accountNumber')?.slice(-4)}
-                        </span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-sm text-gray-600">
-                          Routing Number:
-                        </span>
-                        <span className="text-sm font-medium font-mono">
-                          {watch('routingNumber')}
-                        </span>
-                      </div>
-                    </>
-                  )}
-
-                  {destinationType === 'iban' && (
-                    <>
-                      <div className="flex justify-between">
-                        <span className="text-sm text-gray-600">
-                          Account Holder:
-                        </span>
-                        <span className="text-sm font-medium">
-                          {accountHolderType === 'individual'
-                            ? `${watch('accountHolderFirstName')} ${watch('accountHolderLastName')}`
-                            : watch('accountHolderBusinessName')}
-                        </span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-sm text-gray-600">IBAN:</span>
-                        <span className="text-sm font-medium font-mono">
-                          {watch('iban')}
-                        </span>
-                      </div>
-                      {watch('bic') && (
-                        <div className="flex justify-between">
-                          <span className="text-sm text-gray-600">
-                            BIC/SWIFT:
+                    {destinationType !== 'crypto' && (
+                      <>
+                        <div className="border-t border-[#101010]/10 pt-3 flex justify-between">
+                          <span className="text-[13px] text-[#101010]/60">
+                            Recipient
                           </span>
-                          <span className="text-sm font-medium font-mono">
-                            {watch('bic')}
+                          <span className="text-[13px] text-[#101010]">
+                            {accountHolderType === 'individual'
+                              ? `${watch('accountHolderFirstName')} ${watch('accountHolderLastName')}`
+                              : watch('accountHolderBusinessName')}
                           </span>
                         </div>
-                      )}
-                    </>
-                  )}
+                        <div className="flex justify-between">
+                          <span className="text-[13px] text-[#101010]/60">
+                            Bank
+                          </span>
+                          <span className="text-[13px] text-[#101010]">
+                            {watch('bankName')}
+                          </span>
+                        </div>
+                      </>
+                    )}
 
-                  {destinationType === 'crypto' && (
-                    <>
-                      <div className="flex justify-between">
-                        <span className="text-sm text-gray-600">
-                          Wallet Address:
+                    {destinationType === 'crypto' && (
+                      <div className="border-t border-[#101010]/10 pt-3 flex justify-between">
+                        <span className="text-[13px] text-[#101010]/60">
+                          Wallet
                         </span>
-                        <span className="text-sm font-medium font-mono">
+                        <span className="text-[12px] font-mono text-[#101010]">
                           {watch('cryptoAddress')?.slice(0, 6)}...
                           {watch('cryptoAddress')?.slice(-4)}
                         </span>
                       </div>
-                      <div className="flex justify-between">
-                        <span className="text-sm text-gray-600">Network:</span>
-                        <span className="text-sm font-medium">Base</span>
-                      </div>
-                    </>
-                  )}
-
-                  {destinationType !== 'crypto' && (
-                    <div className="flex justify-between">
-                      <span className="text-sm text-gray-600">Address:</span>
-                      <span className="text-sm font-medium">
-                        {watch('streetLine1')}, {watch('city')},{' '}
-                        {watch('postalCode')}, {watch('country')}
-                      </span>
-                    </div>
-                  )}
-                </div>
-
-                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                  <div className="flex items-start">
-                    <div className="flex-shrink-0">
-                      <svg
-                        className="h-5 w-5 text-blue-400"
-                        viewBox="0 0 20 20"
-                        fill="currentColor"
-                      >
-                        <path
-                          fillRule="evenodd"
-                          d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z"
-                          clipRule="evenodd"
-                        />
-                      </svg>
-                    </div>
-                    <div className="ml-3">
-                      <h3 className="text-sm font-medium text-blue-800">
-                        Transfer Information
-                      </h3>
-                      <div className="mt-2 text-sm text-blue-700">
-                        <p>
-                          {destinationType === 'crypto'
-                            ? 'Your USDC will be sent directly to the specified wallet address. This transaction is irreversible.'
-                            : `Your funds will be transferred to the specified ${destinationType.toUpperCase()} account. Processing time is typically 1-3 business days.`}
-                        </p>
-                      </div>
-                    </div>
+                    )}
                   </div>
                 </div>
-              </div>
 
-              <div className="flex gap-3">
-                <Button
-                  type="button"
-                  onClick={handlePreviousStep}
-                  variant="outline"
-                  className="flex-1"
-                >
-                  <ArrowLeft className="mr-2 h-4 w-4" />
-                  Back
-                </Button>
-                <Button
-                  type="submit"
-                  disabled={createTransferMutation.isPending}
-                  className="flex-1 h-12 bg-blue-600 hover:bg-blue-700 text-white font-medium"
-                  size="lg"
-                >
-                  {createTransferMutation.isPending ? (
-                    <>
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />{' '}
-                      Processing...
-                    </>
-                  ) : (
-                    'Complete Transfer'
-                  )}
-                  <ArrowRight className="ml-2 h-4 w-4" />
-                </Button>
+                <Alert className="bg-[#FFF8E6] border-[#FFA500]/20">
+                  <AlertCircle className="h-4 w-4 text-[#FFA500]" />
+                  <AlertDescription className="text-[12px] text-[#101010]/70">
+                    {destinationType === 'crypto'
+                      ? 'Crypto transfers are irreversible. Please verify the address carefully.'
+                      : 'Bank transfers typically process within 1-3 business days.'}
+                  </AlertDescription>
+                </Alert>
+
+                <div className="flex gap-3">
+                  <Button
+                    type="button"
+                    onClick={handlePreviousStep}
+                    variant="outline"
+                    disabled={isSubmittingTransfer}
+                    className="flex-1 h-11 border-[#101010]/10 hover:bg-[#F7F7F2]/50"
+                  >
+                    <ArrowLeft className="mr-2 h-4 w-4" />
+                    Back
+                  </Button>
+                  <Button
+                    type="submit"
+                    disabled={isSubmittingTransfer}
+                    className="flex-1 bg-[#1B29FF] hover:bg-[#1420CC] text-white h-12 text-[14px] font-semibold"
+                  >
+                    {isSubmittingTransfer ? (
+                      <>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        {isLoading ? loadingMessage : 'Processing…'}
+                      </>
+                    ) : (
+                      <>
+                        Complete transfer
+                        <ArrowRight className="ml-2 h-4 w-4" />
+                      </>
+                    )}
+                  </Button>
+                </div>
               </div>
             </div>
           )}
 
-          {/* Error display for all steps */}
+          {/* Error Display */}
           {error && (
-            <Alert variant="destructive" className="mt-4">
-              <AlertTitle>Error</AlertTitle>
-              <AlertDescription>{error}</AlertDescription>
+            <Alert className="bg-red-50 border-red-200">
+              <AlertCircle className="h-4 w-4 text-red-600" />
+              <AlertTitle className="text-red-900">Error</AlertTitle>
+              <AlertDescription className="text-red-700">
+                {error}
+              </AlertDescription>
             </Alert>
           )}
         </form>
-      </CardContent>
-    </Card>
+      </div>
+    </div>
   );
 }

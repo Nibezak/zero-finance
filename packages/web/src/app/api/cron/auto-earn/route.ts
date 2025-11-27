@@ -1,6 +1,11 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { db } from '@/db';
-import { autoEarnConfigs, userSafes, earnDeposits, incomingDeposits } from '@/db/schema';
+import {
+  autoEarnConfigs,
+  userSafes,
+  earnDeposits,
+  incomingDeposits,
+} from '@/db/schema';
 import { eq, and, isNull, desc } from 'drizzle-orm';
 import {
   createPublicClient,
@@ -18,6 +23,11 @@ import { formatUnits } from 'viem';
 import crypto from 'crypto';
 import { USDC_ADDRESS, USDC_DECIMALS } from '@/lib/constants';
 import { getBaseRpcUrl } from '@/lib/base-rpc-url';
+import { ensureUserWorkspace } from '@/server/utils/workspace';
+import {
+  getVaultApyBasisPoints,
+  resolveVaultDecimals,
+} from '@/server/earn/vault-apy-service';
 
 // Helper to validate the cron key (to protect endpoint from unauthorized access)
 function validateCronKey(req: NextRequest): boolean {
@@ -93,7 +103,11 @@ async function fetchIncomingTransactions(safeAddress: string, fromTimestamp?: Da
   }
 }
 
-async function syncIncomingDeposits(userDid: string, safeAddress: string): Promise<void> {
+async function syncIncomingDeposits(
+  userDid: string,
+  safeAddress: string,
+  workspaceId: string | null,
+): Promise<void> {
   // Get the latest synced transaction timestamp
   const latestDeposit = await db.query.incomingDeposits.findFirst({
     where: and(
@@ -108,14 +122,38 @@ async function syncIncomingDeposits(userDid: string, safeAddress: string): Promi
   // Fetch transactions from Safe Transaction Service
   const transactions = await fetchIncomingTransactions(safeAddress, fromTimestamp);
   
-  // Filter for USDC transfers
-  const usdcTransfers = transactions.filter(tx => 
-    tx.type === 'ERC20_TRANSFER' && 
-    tx.tokenAddress?.toLowerCase() === USDC_ADDRESS.toLowerCase() &&
-    tx.to.toLowerCase() === safeAddress.toLowerCase()
-  );
+  // Get all vault addresses for this user to filter out withdrawals
+  const userVaults = await db.query.earnDeposits.findMany({
+    where: and(
+      eq(earnDeposits.userDid, userDid),
+      eq(earnDeposits.safeAddress, safeAddress),
+      workspaceId
+        ? eq(earnDeposits.workspaceId, workspaceId)
+        : isNull(earnDeposits.workspaceId),
+    ),
+    columns: { vaultAddress: true },
+  });
   
-  console.log(`[auto-earn-cron] Found ${usdcTransfers.length} new USDC deposits for ${safeAddress}`);
+  const vaultAddresses = new Set(userVaults.map(v => v.vaultAddress.toLowerCase()));
+  console.log(`[auto-earn-cron] Found ${vaultAddresses.size} vault addresses for user ${userDid}: ${Array.from(vaultAddresses).join(', ')}`);
+  
+  // Filter for USDC transfers that are NOT from vault addresses (i.e., real deposits)
+  const usdcTransfers = transactions.filter(tx => {
+    const isUsdcTransfer = tx.type === 'ERC20_TRANSFER' && 
+      tx.tokenAddress?.toLowerCase() === USDC_ADDRESS.toLowerCase() &&
+      tx.to.toLowerCase() === safeAddress.toLowerCase();
+    
+    const isFromVault = vaultAddresses.has(tx.from.toLowerCase());
+    
+    if (isUsdcTransfer && isFromVault) {
+      console.log(`[auto-earn-cron] Filtering out vault withdrawal: ${formatUnits(BigInt(tx.value), USDC_DECIMALS)} USDC from vault ${tx.from} (tx: ${tx.transactionHash})`);
+      return false;
+    }
+    
+    return isUsdcTransfer;
+  });
+  
+  console.log(`[auto-earn-cron] Found ${usdcTransfers.length} new USDC deposits for ${safeAddress} (filtered out vault withdrawals)`);
   
   // Store new deposits in database
   for (const transfer of usdcTransfers) {
@@ -132,21 +170,28 @@ async function syncIncomingDeposits(userDid: string, safeAddress: string): Promi
       
       await db.insert(incomingDeposits).values({
         userDid,
+        workspaceId: workspaceId ?? null,
         safeAddress: safeAddress as `0x${string}`,
         txHash: transfer.transactionHash as `0x${string}`,
         fromAddress: transfer.from as `0x${string}`,
         tokenAddress: USDC_ADDRESS as `0x${string}`,
-        amount: BigInt(transfer.value),
+        amount: BigInt(transfer.value).toString(),
         blockNumber: BigInt(transfer.blockNumber),
         timestamp: new Date(transfer.executionDate),
         swept: false,
         metadata: {
           tokenInfo: transfer.tokenInfo,
           source: 'safe-transaction-service',
+          isVaultWithdrawal: false, // Explicitly mark as not a vault withdrawal
         },
       });
       
-      console.log(`[auto-earn-cron] Stored new deposit: ${formatUnits(BigInt(transfer.value), USDC_DECIMALS)} USDC from ${transfer.from}`);
+        console.log(
+          `[auto-earn-cron] Stored new deposit: ${formatUnits(
+            BigInt(transfer.value),
+            USDC_DECIMALS,
+          )} USDC from ${transfer.from} (workspace: ${workspaceId ?? 'none'})`,
+        );
     } catch (error) {
       console.error(`[auto-earn-cron] Error storing deposit ${transfer.transactionHash}:`, error);
     }
@@ -186,17 +231,40 @@ async function sweep() {
         continue;
       }
 
+      let workspaceId = safeRec.workspaceId ?? null;
+      if (!workspaceId) {
+        try {
+          const { workspaceId: ensuredWorkspaceId } = await ensureUserWorkspace(db, userDid);
+          workspaceId = ensuredWorkspaceId;
+          await db
+            .update(userSafes)
+            .set({ workspaceId })
+            .where(eq(userSafes.id, safeRec.id));
+          console.log(
+            `[auto-earn-cron] Attached workspace ${workspaceId} to safe ${safeAddr} for user ${userDid}`,
+          );
+        } catch (workspaceError) {
+          console.warn(
+            `[auto-earn-cron] Failed to resolve workspace for ${userDid}; continuing without workspace context`,
+            workspaceError,
+          );
+        }
+      }
+
       console.log(`[auto-earn-cron] 📊 Processing Safe ${safeAddr}`);
       
       // Step 1: Sync incoming deposits from blockchain
-      await syncIncomingDeposits(userDid, safeAddr);
+      await syncIncomingDeposits(userDid, safeAddr, workspaceId);
       
       // Step 2: Get unswept deposits
       const unsweptDeposits = await db.query.incomingDeposits.findMany({
         where: and(
           eq(incomingDeposits.safeAddress, safeAddr),
           eq(incomingDeposits.tokenAddress, USDC_ADDRESS),
-          eq(incomingDeposits.swept, false)
+          eq(incomingDeposits.swept, false),
+          workspaceId
+            ? eq(incomingDeposits.workspaceId, workspaceId)
+            : isNull(incomingDeposits.workspaceId),
         ),
         orderBy: [desc(incomingDeposits.timestamp)],
       });
@@ -210,21 +278,24 @@ async function sweep() {
       
       // Step 3: Process each unswept deposit
       for (const deposit of unsweptDeposits) {
-        const amountToSave = (deposit.amount * BigInt(pct)) / 100n;
+        const depositAmount = BigInt(deposit.amount);
+        const amountToSave = (depositAmount * BigInt(pct)) / 100n;
         
         console.log(`[auto-earn-cron] Processing deposit ${deposit.txHash}:`);
-        console.log(`  💰 Original amount: ${formatUnits(deposit.amount, USDC_DECIMALS)} USDC`);
+        console.log(`  💰 Original amount: ${formatUnits(depositAmount, USDC_DECIMALS)} USDC`);
         console.log(`  📊 Percentage to save: ${pct}%`);
         console.log(`  💡 Amount to save: ${formatUnits(amountToSave, USDC_DECIMALS)} USDC`);
         
         if (amountToSave === 0n) {
           console.log(`  ⚠️  Amount too small to save (rounds to 0) - marking as swept`);
-          await db.update(incomingDeposits)
-            .set({ 
-              swept: true, 
-              sweptAmount: 0n,
+          await db
+            .update(incomingDeposits)
+            .set({
+              swept: true,
+              sweptAmount: '0',
               sweptPercentage: pct,
-              sweptAt: new Date()
+              sweptAt: new Date(),
+              workspaceId: workspaceId ?? null,
             })
             .where(eq(incomingDeposits.id, deposit.id));
           continue;
@@ -293,44 +364,62 @@ async function sweep() {
           actualAmountDeposited = amountToSave;
         }
 
+        const resolvedVaultAddress =
+          vaultAddress ?? '0x0000000000000000000000000000000000000000';
+        const { apyBasisPoints } = await getVaultApyBasisPoints(
+          resolvedVaultAddress,
+        );
+        const assetDecimals = resolveVaultDecimals(resolvedVaultAddress);
+
         // Record deposit in earnDeposits table
         await db.insert(earnDeposits).values({
           id: crypto.randomUUID(),
           userDid,
+          workspaceId: workspaceId ?? null,
           safeAddress: safeAddr,
-          vaultAddress: vaultAddress ?? '0x0000000000000000000000000000000000000000',
+          vaultAddress: resolvedVaultAddress,
           tokenAddress: USDC_ADDRESS,
-          assetsDeposited: actualAmountDeposited,
-          sharesReceived,
+          assetsDeposited: actualAmountDeposited.toString(),
+          sharesReceived: sharesReceived.toString(),
           txHash,
           timestamp: new Date(),
           depositPercentage: pct,
+          apyBasisPoints,
+          assetDecimals,
         });
 
         // Update incoming deposit as swept
-        await db.update(incomingDeposits)
+        await db
+          .update(incomingDeposits)
           .set({
             swept: true,
-            sweptAmount: actualAmountDeposited,
+            sweptAmount: actualAmountDeposited.toString(),
             sweptPercentage: pct,
             sweptTxHash: txHash,
             sweptAt: new Date(),
+            workspaceId: workspaceId ?? null,
           })
           .where(eq(incomingDeposits.id, deposit.id));
 
-        await db.update(autoEarnConfigs).set({ lastTrigger: new Date() }).where(
-          and(eq(autoEarnConfigs.userDid, userDid), eq(autoEarnConfigs.safeAddress, safeAddr)),
-        );
+        await db
+          .update(autoEarnConfigs)
+          .set({ lastTrigger: new Date(), workspaceId: workspaceId ?? null })
+          .where(
+            and(
+              eq(autoEarnConfigs.userDid, userDid),
+              eq(autoEarnConfigs.safeAddress, safeAddr),
+            ),
+          );
 
         console.log(`[auto-earn-cron] 📊 SUMMARY for deposit ${deposit.txHash}:`);
-        console.log(`  🔍 Original deposit: ${formatUnits(deposit.amount, USDC_DECIMALS)} USDC`);
+        console.log(`  🔍 Original deposit: ${formatUnits(depositAmount, USDC_DECIMALS)} USDC`);
         console.log(`  💡 Saved: ${formatUnits(actualAmountDeposited, USDC_DECIMALS)} USDC (${pct}%)`);
         console.log(`  🎯 Shares Received: ${formatUnits(sharesReceived, 18)} vault shares`);
         
         results.push({
           safeAddress: safeAddr,
           depositTxHash: deposit.txHash,
-          originalAmount: formatUnits(deposit.amount, USDC_DECIMALS),
+          originalAmount: formatUnits(depositAmount, USDC_DECIMALS),
           amountSaved: formatUnits(actualAmountDeposited, USDC_DECIMALS),
           sweepTxHash: txHash,
         });

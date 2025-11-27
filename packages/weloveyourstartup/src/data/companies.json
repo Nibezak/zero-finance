@@ -1,0 +1,621 @@
+{
+  "companies": [
+    {
+      "publishedDate": "2025-09-15",
+      "featuredOrder": 2,
+      "id": "mediar",
+      "name": "Mediar",
+      "tagline": "AI hands for every Windows desktop",
+      "description": "AI agents that automate legacy Windows workflows. 95% success rate, sub-20s latency.",
+      "longDescription": "Legacy Windows software powers the global economy but has no APIs. Mediar gives AI its hands—agents that watch, learn, and automate across hundreds of desktops.",
+      "logo": "https://www.mediar.ai/icon.svg",
+      "website": "https://mediar.ai",
+      "twitter": "https://x.com/louis030195",
+      "category": "AI Automation",
+      "whyWeLoveThem": "Bridging AI intelligence with legacy software that powers 90% of enterprises. Production-ready automation that cuts costs by 90%.",
+      "funFact": "AI learns in 1 day, achieves 95% success rate—faster than training a human.",
+      "funding": {
+        "amount": 2800000,
+        "round": "Pre-Seed",
+        "date": "2025",
+        "valuation": 40000000,
+        "leadInvestors": [
+          "F.inc",
+          "Top Harvest Capital",
+          "Seed Club Ventures",
+          "LG Technology Ventures"
+        ],
+        "announcement": "We raised $2.8M to bring AI hands to every Windows desktop."
+      },
+      "founders": [
+        {
+          "id": "louis030195",
+          "name": "Louis Beaumont",
+          "role": "Co-founder",
+          "twitter": "https://x.com/louis030195",
+          "avatar": "https://pbs.twimg.com/profile_images/1878823799917084672/EBSefEUo_400x400.jpg",
+          "bio": "Building AI that never forgets. Previously built Screenpipe."
+        },
+        {
+          "id": "m13v_",
+          "name": "Matt",
+          "role": "Co-founder",
+          "twitter": "https://x.com/m13v_",
+          "avatar": "https://pbs.twimg.com/profile_images/1749288192958935040/dPXHmIy__400x400.jpg",
+          "bio": "Engineering the future of automation."
+        }
+      ],
+      "metrics": {
+        "automationSuccess": "95%",
+        "deploymentTime": "24-48 hours",
+        "latency": "<20s",
+        "costSavings": "90%"
+      },
+      "showcase": {
+        "primaryColor": "#1B29FF",
+        "gradient": "from-blue-500 to-purple-600",
+        "emoji": "🤖",
+        "featured": true,
+        "order": 1
+      }
+    },
+    {
+      "publishedDate": "2025-09-22",
+      "featuredOrder": 1,
+      "id": "shield",
+      "name": "Shield",
+      "tagline": "Neobank for global trade businesses",
+      "description": "Neobank making stablecoin payments legal and simple for global trade.",
+      "longDescription": "Compliance-first infrastructure for exporters to accept USDT payments. Same-day USD settlement.",
+      "logo": "https://api.typedream.com/v0/document/public/5cedd7e2-1039-4ac1-871c-a4412e831651_SHIELD_Logo_v1_png.png",
+      "website": "https://www.getshield.xyz",
+      "twitter": "https://x.com/shield_xyz",
+      "category": "Cross-Border Payments",
+      "whyWeLoveThem": "Vertical compliance for high-value trade flows. Crypto rails meet bank-grade settlement, removing bottlenecks that freeze legitimate businesses.",
+      "funFact": "Demand is so strong they run a waitlist to keep throughput stable.",
+      "funding": {
+        "amount": 5000000,
+        "round": "Seed",
+        "date": "2025-09-22",
+        "valuation": null,
+        "leadInvestors": [
+          "Giant Ventures",
+          "a16z crypto CSX",
+          "Factor Capital",
+          "Strategic angels from Bank of America",
+          "Strategic angels from Coinbase",
+          "Strategic angels from AMEX",
+          "Strategic angels from Menlo Ventures"
+        ],
+        "announcement": "We raised $5M to build a neobank for global trade businesses."
+      },
+      "founders": [
+        {
+          "id": "emmanuel-udotong",
+          "name": "Emmanuel Udotong",
+          "role": "Co-founder & CEO",
+          "twitter": "https://x.com/UdotongE",
+          "avatar": "/images/founders/emmanuel-udotong.png",
+          "bio": "Former McKinsey risk advisor and exporter building stablecoin rails for trade corridors."
+        },
+        {
+          "id": "isaiah-udotong",
+          "name": "Isaiah Udotong",
+          "role": "Co-founder & COO",
+          "twitter": "https://x.com/isaiahudotong",
+          "avatar": "/images/founders/isaiah-udotong.png",
+          "bio": "MIT-trained operator scaling compliance-first payments after firsthand export challenges."
+        },
+        {
+          "id": "luis-carchi",
+          "name": "Luis Carchi",
+          "role": "Co-founder & CTO",
+          "twitter": "https://x.com/LuissCarchi",
+          "avatar": "/images/founders/luis-carchi.png",
+          "bio": "Princeton engineer and ex-Facebook product leader architecting Shield's stablecoin infrastructure."
+        }
+      ],
+      "metrics": {
+        "processedVolume": "$150M+ in the first year",
+        "monthlyVolume": "$40M processed last month",
+        "clientSegments": "Exporters across Latin America, Africa, and Asia",
+        "settlement": "Same-day USD wires from stablecoin payments"
+      },
+      "showcase": {
+        "primaryColor": "#0F172A",
+        "gradient": "from-emerald-500 to-cyan-500",
+        "emoji": "🌍",
+        "featured": true,
+        "order": 2
+      }
+    },
+    {
+      "publishedDate": "2025-11-03",
+      "featuredOrder": 3,
+      "id": "lava",
+      "name": "Lava",
+      "tagline": "Bitcoin-backed line of credit at 5%",
+      "description": "Bitcoin-backed credit at 5%. Access dollars instantly without selling BTC.",
+      "longDescription": "Self-custodial DLCs let you unlock Bitcoin's value while keeping full control. $100 to $1B+, processed in under 5 seconds.",
+      "logo": "/images/companies/lava-logo.svg",
+      "models3d": [
+        "/CloudSat (A).glb",
+        "/Aeronomy of Ice in the Mesosphere.glb",
+        "/Advanced Crew Escape Suit.glb",
+        "/International Space Station (ISS) (A).glb"
+      ],
+      "modelConfigs": [
+        {
+          "cameraPosition": [0, 0, 200],
+          "cameraFov": 63,
+          "rotation": { "x": -1.47, "y": -2.42, "z": -3.94 },
+          "scale": 0.03,
+          "position": { "x": -50, "y": 32.9, "z": -50 }
+        },
+        {
+          "cameraPosition": [0, 0, 15],
+          "cameraFov": 75,
+          "rotation": { "x": -1.2, "y": 0, "z": -0.5 },
+          "scale": 0.7,
+          "position": { "x": 0, "y": 0, "z": 12.0 }
+        },
+        {
+          "cameraPosition": [0, 0, 15],
+          "cameraFov": 75,
+          "rotation": { "x": -1.2, "y": 0, "z": -0.5 },
+          "scale": 0.7,
+          "position": { "x": 0, "y": 0, "z": 12.0 }
+        },
+        {
+          "cameraPosition": [0, 6, 9],
+          "cameraFov": 75,
+          "rotation": { "x": -1.2, "y": 0, "z": -0.5 },
+          "scale": 1.81,
+          "position": { "x": 0, "y": 0, "z": 12 }
+        },
+        {
+          "cameraPosition": [0, 0, 15],
+          "cameraFov": 75,
+          "rotation": { "x": -1.2, "y": 0, "z": -0.5 },
+          "scale": 0.7,
+          "position": { "x": 0, "y": 0, "z": 12.0 }
+        }
+      ],
+      "website": "https://www.lava.xyz",
+      "twitter": "https://x.com/lava_xyz",
+      "category": "Bitcoin Finance",
+      "whyWeLoveThem": "True self-custody through DLCs. Industry-leading rates. No rehypothecation risk. The future of Bitcoin-native finance.",
+      "funFact": "Loans in 400ms—faster than a blink. Global from day one.",
+      "funding": {
+        "amount": 200000000,
+        "round": "Series B",
+        "date": "2025-11-03",
+        "valuation": null,
+        "leadInvestors": [
+          "Anthony Pompliano",
+          "Eric Jackson"
+        ],
+        "announcement": "We raised $200M to scale the world's first bitcoin-backed line of credit globally."
+      },
+      "founders": [
+        {
+          "id": "shehzan-maredia",
+          "name": "Shehzan Maredia",
+          "role": "Founder & CEO",
+          "twitter": "https://x.com/MarediaShehzan",
+          "linkedin": "https://www.linkedin.com/in/shehzan-maredia314",
+          "avatar": "/images/founders/shehzan-maredia.jpg",
+          "bio": "Building the financial infrastructure for the Bitcoin standard. Enabling people to save in BTC, spend in dollars, and live free."
+        }
+      ],
+      "metrics": {
+        "interestRate": "5% (+ 2% capital charge)",
+        "loanProcessing": "Sub-second (avg 400ms)",
+        "loanRange": "$100 to $1B+",
+        "availability": "Global - no restrictions",
+        "collateral": "Bitcoin-backed with DLCs",
+        "yieldForLenders": "Up to 7.5% APY"
+      },
+      "showcase": {
+        "primaryColor": "#FF6B00",
+        "gradient": "from-orange-500 to-red-600",
+        "emoji": "₿",
+        "featured": true,
+        "order": 3
+      }
+    },
+    {
+      "publishedDate": "2025-10-09",
+      "featuredOrder": 4,
+      "id": "parallel",
+      "name": "Parallel",
+      "tagline": "AI-native FP&A platform for startups",
+      "description": "AI CFO for startups. Live forecasts, scenario modeling, board materials—all automated.",
+      "longDescription": "CFO-level insight without a finance team. AI agents clean data, run scenarios, draft materials. Fractional CFO oversight.",
+      "logo": "/images/companies/parallel-logo.svg",
+      "models3d": [
+        "/parallel-model.glb",
+        "/CloudSat (A).glb",
+        "/Aeronomy of Ice in the Mesosphere.glb",
+        "/International Space Station (ISS) (A).glb"
+      ],
+      "modelConfigs": [
+        {
+          "cameraPosition": [0, 0, 1],
+          "cameraFov": 77,
+          "rotation": { "x": -0.8, "y": 0.64, "z": -2.46 },
+          "scale": 1.88,
+          "position": { "x": 0, "y": 0, "z": 0 }
+        },
+        {
+          "cameraPosition": [20, 6, -14],
+          "cameraFov": 120,
+          "rotation": { "x": -4.72, "y": 5.45, "z": 1.67 },
+          "scale": 0.01,
+          "position": { "x": 0, "y": 0, "z": -47.8 }
+        },
+        {
+          "cameraPosition": [0, 0, 15],
+          "cameraFov": 75,
+          "rotation": { "x": -1.2, "y": 0, "z": -0.5 },
+          "scale": 0.7,
+          "position": { "x": 0, "y": 0, "z": 12.0 }
+        },
+        {
+          "cameraPosition": [0, 0, 15],
+          "cameraFov": 75,
+          "rotation": { "x": -1.2, "y": 0, "z": -0.5 },
+          "scale": 0.7,
+          "position": { "x": 0, "y": 0, "z": 12.0 }
+        },
+        {
+          "cameraPosition": [0, 0, 15],
+          "cameraFov": 75,
+          "rotation": { "x": -1.2, "y": 0, "z": -0.5 },
+          "scale": 0.7,
+          "position": { "x": 0, "y": 0, "z": 12.0 }
+        }
+      ],
+      "website": "https://getparallel.com",
+      "twitter": "https://x.com/_renatov",
+      "category": "FP&A / Finance Software",
+      "whyWeLoveThem": "AI automation meets fractional CFO oversight. Live, audit-ready forecasts. Focus on headcount—the biggest startup cost driver.",
+      "funFact": "Pre-seed to seed in 13 months. AI-native approach resonates with VCs.",
+      "funding": {
+        "amount": 2400000,
+        "round": "Seed",
+        "date": "2025-10-09",
+        "valuation": null,
+        "leadInvestors": [
+          "Night Capital",
+          "K5 Tokyo Black"
+        ],
+        "participatingInvestors": [
+          "Penny Jar Capital",
+          "Background Capital",
+          "Mintaka VC",
+          "Path Ventures"
+        ],
+        "angels": [
+          "Alex Bean (Co-founder, Divvy)",
+          "Jared Rodman (Co-founder, Weave)",
+          "Jeron Paul (Founder, Spiff)",
+          "Colin Zima (Founder, Omni)",
+          "Jeremy Yap",
+          "Brian Pokorny"
+        ],
+        "announcement": "We raised $2.4M to launch the AI-native finance team for startups."
+      },
+      "founders": [
+        {
+          "id": "renato-villanueva",
+          "name": "Renato Villanueva",
+          "role": "Founder & CEO",
+          "twitter": "https://x.com/_renatov",
+          "linkedin": "https://www.linkedin.com/in/renato-villanueva-ceo",
+          "avatar": "/images/founders/renato-villanueva.jpg",
+          "bio": "Former Finance & Strategy Manager at Divvy building the AI CFO for startups. Immigrant from Peru who identified a critical gap in budget collaboration tools."
+        },
+        {
+          "id": "tyler-slater",
+          "name": "Tyler Slater",
+          "role": "Co-founder & CTO",
+          "linkedin": "https://www.linkedin.com/in/tyler-slater/",
+          "avatar": "/images/founders/tyler-slater.jpg",
+          "bio": "Former Engineering Manager at MX and ex-CTO at Beam. Building the technical infrastructure for AI-powered financial forecasting."
+        },
+        {
+          "id": "clint-savage",
+          "name": "Clint Savage",
+          "role": "VP of Product",
+          "linkedin": "https://www.linkedin.com/in/clint-savage/",
+          "avatar": "/images/founders/clint-savage.jpg",
+          "bio": "Product leader with 10+ years in Product & Design. Previously at Clozd, Lendio, and Google. Employee #3 at Parallel."
+        },
+        {
+          "id": "rick-saboia",
+          "name": "Rick Sabóia",
+          "role": "Co-founder & Sales Director",
+          "linkedin": "https://www.linkedin.com/in/riquesaboia/",
+          "avatar": "/images/founders/rick-saboia.jpg",
+          "bio": "Building automated finance solutions for startups. Focused on making financial forecasting accessible to every founder."
+        }
+      ],
+      "metrics": {
+        "targetCustomers": "B2B SaaS companies from pre-seed through Series A+",
+        "integrations": "QuickBooks, Puzzle",
+        "service": "AI agents + fractional CFO oversight",
+        "deliverables": "Live, auditable forecasts and board materials",
+        "teamSize": "6-10 employees",
+        "headquarters": "Lehi, Utah"
+      },
+      "showcase": {
+        "primaryColor": "#4F46E5",
+        "gradient": "from-indigo-500 to-purple-600",
+        "emoji": "📊",
+        "featured": true,
+        "order": 4
+      }
+    },
+    {
+      "publishedDate": "2025-01-11",
+      "featuredOrder": 5,
+      "id": "0finance",
+      "name": "0 Finance",
+      "tagline": "High-yield savings for your startup's runway",
+      "description": "Earn 2-3x more than traditional banks on idle cash while maintaining full liquidity. No minimums, no lock-ups, instant withdrawals.",
+      "longDescription": "Open US bank accounts with routing numbers and EU IBANs instantly. Receive wire transfers, ACH, and SEPA payments. Your idle cash automatically sweeps to vetted yield strategies on battle-tested DeFi protocols securing $8B+ in assets. Spend with your global corporate card or withdraw anytime with zero penalties. For fintechs: embed high-yield savings via RESTful API with white-label options and sub-1 week integration.",
+      "logo": "/images/companies/0finance-logo.png",
+      "website": "https://0.finance",
+      "twitter": "https://x.com/0financexyz",
+      "category": "Embedded Finance",
+      "whyWeLoveThem": "From concept to first customers with real deposits in 8 weeks. $2M+ in LOI commitments from 15+ startups. Self-custody architecture means you truly own your funds.",
+      "funding": {
+        "amount": 0,
+        "round": "Pre-Seed",
+        "date": "2025",
+        "valuation": null,
+        "leadInvestors": [
+          "OrangeDAO"
+        ],
+        "announcement": "We raised $170K from OrangeDAO. Now raising $2.5M seed."
+      },
+      "founders": [
+        {
+          "id": "benjamin-shafii",
+          "name": "Benjamin Shafii",
+          "role": "Co-founder & CEO",
+          "twitter": "https://x.com/benjaminshafii",
+          "linkedin": "https://www.linkedin.com/in/ben-shafii-450039107/",
+          "avatar": "/images/founders/benjamin-shafii.jpg",
+          "bio": "Founding engineer at Gnosis Pay ($75M volume). 7 years in crypto payments at Request Network."
+        },
+        {
+          "id": "raghav-aggarwal",
+          "name": "Raghav Aggarwal",
+          "role": "Co-founder & Head of Product",
+          "twitter": "https://x.com/raghavagg",
+          "linkedin": "https://www.linkedin.com/in/raghavagg/",
+          "avatar": "/images/founders/raghav-aggarwal.jpg",
+          "bio": "Employee #2 at Gnosis Pay, Head of Product. Scaled from idea to $75M in transactions. Ex-Bain & Company, London Business School MBA."
+        }
+      ],
+      "metrics": {
+        "loiCommitments": "$2M+ from 15+ startups",
+        "timeToMarket": "8 weeks from concept to first customer",
+        "yieldMultiple": "2-3x traditional bank rates",
+        "apiIntegration": "Sub-1 week integration time",
+        "infrastructure": "$8B+ secured in battle-tested money markets"
+      },
+      "showcase": {
+        "primaryColor": "#6366F1",
+        "gradient": "from-indigo-500 to-purple-600",
+        "emoji": "🏦",
+        "featured": true,
+        "order": 5
+      }
+    }
+  ],
+  "calculatorConfig": {
+    "bankRate": 2,
+    "zeroRate": 8,
+    "defaultAmount": 2800000,
+    "minAmount": 100000,
+    "maxAmount": 10000000,
+    "step": 50000
+  },
+  "expenses": [
+    {
+      "name": "AWS",
+      "cost": 2000,
+      "icon": "☁️"
+    },
+    {
+      "name": "Notion",
+      "cost": 500,
+      "icon": "📝"
+    },
+    {
+      "name": "Slack",
+      "cost": 1200,
+      "icon": "💬"
+    },
+    {
+      "name": "Vercel",
+      "cost": 800,
+      "icon": "▲"
+    },
+    {
+      "name": "GitHub",
+      "cost": 600,
+      "icon": "🐙"
+    },
+    {
+      "name": "Figma",
+      "cost": 900,
+      "icon": "🎨"
+    },
+    {
+      "name": "Linear",
+      "cost": 400,
+      "icon": "📊"
+    },
+    {
+      "name": "Office Space",
+      "cost": 5000,
+      "icon": "🏢"
+    },
+    {
+      "name": "Team Lunches",
+      "cost": 2000,
+      "icon": "🍕"
+    },
+    {
+      "name": "Conference Budget",
+      "cost": 3000,
+      "icon": "🎤"
+    }
+  ],
+  "teamMembers": [
+    {
+      "role": "Part-time Intern",
+      "salary": 20000,
+      "icon": "🎓"
+    },
+    {
+      "role": "Full-time Intern",
+      "salary": 35000,
+      "icon": "📚"
+    },
+    {
+      "role": "Virtual Assistant",
+      "salary": 40000,
+      "icon": "💼"
+    },
+    {
+      "role": "Junior Content Writer",
+      "salary": 45000,
+      "icon": "✍️"
+    },
+    {
+      "role": "Community Manager",
+      "salary": 50000,
+      "icon": "🌐"
+    },
+    {
+      "role": "Social Media Manager",
+      "salary": 55000,
+      "icon": "📱"
+    },
+    {
+      "role": "Content Writer",
+      "salary": 60000,
+      "icon": "📝"
+    },
+    {
+      "role": "Junior Designer",
+      "salary": 65000,
+      "icon": "🎨"
+    },
+    {
+      "role": "Customer Success",
+      "salary": 70000,
+      "icon": "🤝"
+    },
+    {
+      "role": "Sales Development Rep",
+      "salary": 75000,
+      "icon": "📞"
+    },
+    {
+      "role": "Junior Engineer",
+      "salary": 80000,
+      "icon": "👨‍💻"
+    },
+    {
+      "role": "Data Analyst",
+      "salary": 85000,
+      "icon": "📊"
+    },
+    {
+      "role": "Growth Marketer",
+      "salary": 90000,
+      "icon": "📈"
+    },
+    {
+      "role": "QA Engineer",
+      "salary": 95000,
+      "icon": "🔍"
+    },
+    {
+      "role": "Account Executive",
+      "salary": 100000,
+      "icon": "💰"
+    },
+    {
+      "role": "Product Manager",
+      "salary": 110000,
+      "icon": "🎯"
+    },
+    {
+      "role": "Product Designer",
+      "salary": 120000,
+      "icon": "🖌️"
+    },
+    {
+      "role": "DevOps Engineer",
+      "salary": 130000,
+      "icon": "⚙️"
+    },
+    {
+      "role": "Data Scientist",
+      "salary": 140000,
+      "icon": "🔬"
+    },
+    {
+      "role": "Senior Engineer",
+      "salary": 150000,
+      "icon": "🧑‍💻"
+    },
+    {
+      "role": "Senior Product Manager",
+      "salary": 160000,
+      "icon": "🎯"
+    },
+    {
+      "role": "Staff Engineer",
+      "salary": 180000,
+      "icon": "⭐"
+    },
+    {
+      "role": "Engineering Manager",
+      "salary": 190000,
+      "icon": "👔"
+    },
+    {
+      "role": "Head of Product",
+      "salary": 200000,
+      "icon": "🚀"
+    },
+    {
+      "role": "Principal Engineer",
+      "salary": 220000,
+      "icon": "💎"
+    },
+    {
+      "role": "VP Engineering",
+      "salary": 250000,
+      "icon": "🏆"
+    },
+    {
+      "role": "VP Sales",
+      "salary": 260000,
+      "icon": "📈"
+    },
+    {
+      "role": "CTO (Fractional)",
+      "salary": 300000,
+      "icon": "🔮"
+    }
+  ]
+}

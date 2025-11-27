@@ -2,8 +2,7 @@ import { initTRPC, TRPCError } from '@trpc/server';
 import { ContextType } from './context';
 import { getUser } from '@/lib/auth';
 import { db } from '@/db';
-import { users } from '@/db/schema';
-import { eq } from 'drizzle-orm';
+import { ensureUserWorkspace } from './utils/workspace';
 import superjson from 'superjson';
 
 // Initialize tRPC
@@ -18,36 +17,53 @@ export const publicProcedure = t.procedure;
 
 // Create protected procedure (requires authentication)
 const isAuthed = middleware(async ({ ctx, next }) => {
-  // The getUser function already handles token verification
-  const user = await getUser();
+  // Use userId and user from context (already verified and fetched in createContext)
+  // This avoids hitting Privy's rate limit by calling getUser() on every request
+  const privyDid = ctx.userId;
 
-  if (!user || !user.id) {
-    // If getUser returns null or no id, authentication failed
+  if (!privyDid) {
+    // If userId is not in context, authentication failed
     throw new TRPCError({ code: 'UNAUTHORIZED', message: 'Not authenticated' });
   }
 
-  const privyDid = user.id;
+  // Use cached user from context (fetched once in createContext)
+  let user = ctx.user;
+
+  // If user is null but we have userId, create minimal user object
+  // This handles rate limiting scenarios
+  if (!user && privyDid) {
+    console.warn(
+      `0xHypr - User object not in context for ${privyDid}, creating minimal user`,
+    );
+    user = { id: privyDid };
+  }
+
+  if (!user) {
+    throw new TRPCError({
+      code: 'UNAUTHORIZED',
+      message: 'Failed to fetch user details',
+    });
+  }
+
+  const database = (ctx as { db?: typeof db } | undefined)?.db ?? db;
+
+  let workspaceId: string | null = ctx.workspaceId ?? null;
+  let workspaceMembershipId: string | null = ctx.workspaceMembershipId ?? null;
 
   try {
-    // Check if user exists in the database
-    const existingUser = await db.query.users.findFirst({
-      where: eq(users.privyDid, privyDid),
-      columns: { privyDid: true }, // Only need to check for existence
-    });
-
-    // If user doesn't exist, create them
-    if (!existingUser) {
-      console.log(`User with DID ${privyDid} not found in DB. Creating...`);
-      await db.insert(users).values({ privyDid: privyDid });
-      console.log(`User with DID ${privyDid} created successfully.`);
-    }
-  } catch (dbError) {
-    console.error(`Database error during user check/creation for DID ${privyDid}:`, dbError);
-    // Handle potential DB errors, e.g., connection issues
+    const { workspaceId: ensuredWorkspaceId, membership } =
+      await ensureUserWorkspace(database, privyDid);
+    workspaceId = ensuredWorkspaceId;
+    workspaceMembershipId = membership.id;
+  } catch (workspaceError) {
+    console.error(
+      `Database error ensuring workspace for DID ${privyDid}:`,
+      workspaceError,
+    );
     throw new TRPCError({
       code: 'INTERNAL_SERVER_ERROR',
-      message: 'Database operation failed during authentication.',
-      cause: dbError,
+      message: 'Failed to initialise workspace context.',
+      cause: workspaceError,
     });
   }
 
@@ -56,7 +72,9 @@ const isAuthed = middleware(async ({ ctx, next }) => {
     ctx: {
       ...ctx,
       // Pass the full user object to the context
-      user: user, 
+      user,
+      workspaceId,
+      workspaceMembershipId,
     },
   });
 });
@@ -71,10 +89,13 @@ export const createContext = async ({ req }: { req: Request }) => {
   try {
     user = await getUser();
   } catch (error) {
-    console.warn('Failed to get user in tRPC context, continuing as unauthenticated', error);
+    console.warn(
+      'Failed to get user in tRPC context, continuing as unauthenticated',
+      error,
+    );
     // Don't throw - just continue with null user
   }
-  
+
   return {
     req,
     user, // Will be null if not authenticated

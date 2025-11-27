@@ -18,10 +18,29 @@ import {
     NewUserRequest, 
     type InvoiceRole,
     type InvoiceStatus,
-    userRequestsTable 
+    userRequestsTable
 } from '@/db/schema';
-import { eq, and, desc, asc } from 'drizzle-orm';
+import { eq, and, desc, asc, or, ne } from 'drizzle-orm';
 import { getCurrencyConfig, CurrencyConfig } from '@/lib/currencies';
+
+// Simple cache for currency configurations to avoid repeated lookups
+const currencyConfigCache = new Map<string, CurrencyConfig | null>();
+
+// Cached wrapper for getCurrencyConfig
+function getCachedCurrencyConfig(currency: string, network: string): CurrencyConfig | null {
+  const cacheKey = `${currency}-${network}`;
+  
+  if (currencyConfigCache.has(cacheKey)) {
+    return currencyConfigCache.get(cacheKey)!;
+  }
+  
+  const config = getCurrencyConfig(currency, network);
+  // Convert undefined to null for consistent typing
+  const normalizedConfig = config ?? null;
+  currencyConfigCache.set(cacheKey, normalizedConfig);
+  
+  return normalizedConfig;
+}
 import { RequestNetwork, Types, Utils } from '@requestnetwork/request-client.js';
 import { Wallet, ethers } from 'ethers';
 import Decimal from 'decimal.js';
@@ -102,9 +121,13 @@ const addressSchema = z.object({
 const bankDetailsSchema = z
   .object({
     accountHolder: z.string().optional(),
+    accountNumber: z.string().optional(),
+    routingNumber: z.string().optional(),
     iban: z.string().optional(),
     bic: z.string().optional(),
+    swiftCode: z.string().optional(),
     bankName: z.string().optional(),
+    bankAddress: z.string().optional(),
   })
   .optional();
 
@@ -117,6 +140,8 @@ export const invoiceDataSchema = z.object({
   network: z.string().optional(),
   creationDate: z.string(),
   invoiceNumber: z.string(),
+  companyId: z.string().optional(), // Add company ID
+  recipientCompanyId: z.string().optional(), // Add recipient company ID
   sellerInfo: z.object({
     businessName: z.string(),
     email: z.string().email(),
@@ -136,6 +161,8 @@ export const invoiceDataSchema = z.object({
   note: z.string().optional(),
   terms: z.string().optional(),
   paymentType: z.enum(['crypto', 'fiat']).default('crypto'),
+  paymentMethod: z.enum(['ach', 'sepa', 'crypto']).optional(), // Added: specific payment method
+  paymentAddress: z.string().optional(), // Added: crypto wallet address
   currency: z.string(),
   bankDetails: bankDetailsSchema,
   // primarySafeAddress: z.string().optional(), // Removed - will fetch from DB
@@ -178,13 +205,13 @@ async function _internalCommitToRequestNetwork(invoiceId: string, userId: string
     const invoiceData = invoice.invoiceData as z.infer<typeof invoiceDataSchema>;
     if (!invoiceData) throw new TRPCError({ code: 'BAD_REQUEST', message: 'Invoice data missing.' });
 
-    // Fetch necessary user data (wallet, profile)
-    const userWallet = await userProfileService.getOrCreateWallet(userId);
-    if (!userWallet?.privateKey) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'User signing wallet missing.' });
+    // Fetch necessary user data (wallet, profile) in parallel
+    const [userWallet, userProfile] = await Promise.all([
+      userProfileService.getOrCreateWallet(userId),
+      userProfileService.getOrCreateProfile(userId, '') // Email isn't strictly needed if profile exists
+    ]);
     
-    // We need the user profile to get the primary Safe address
-    // Use getOrCreateProfile as it will fetch the existing profile
-    const userProfile = await userProfileService.getOrCreateProfile(userId, /* email placeholder */ ''); // Email isn't strictly needed if profile exists
+    if (!userWallet?.privateKey) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'User signing wallet missing.' });
     if (!userProfile?.primarySafeAddress) {
       throw new TRPCError({ code: 'BAD_REQUEST', message: 'User profile or primary Safe address not found.' });
     }
@@ -207,7 +234,7 @@ async function _internalCommitToRequestNetwork(invoiceId: string, userId: string
                   ? invoiceData.network
                   : 'base';
     }
-    const selectedConfig = getCurrencyConfig(invoiceData.currency, rnNetwork);
+    const selectedConfig = getCachedCurrencyConfig(invoiceData.currency, rnNetwork);
     if (!selectedConfig) {
       throw new TRPCError({ code: 'BAD_REQUEST', message: `Unsupported currency/network combination` });
     }
@@ -225,8 +252,24 @@ async function _internalCommitToRequestNetwork(invoiceId: string, userId: string
         throw new TRPCError({ code: 'BAD_REQUEST', message: 'Bank details required for fiat invoices.' });
       }
       const formattedAmountForInstruction = formatUnits(amountBigInt, decimals);
+      const bankDetails = invoiceData.bankDetails;
+      let paymentInstructionDetails = `Pay ${invoiceData.currency} ${formattedAmountForInstruction} via Bank Transfer.\n`;
+      paymentInstructionDetails += `Account Holder: ${bankDetails?.accountHolder || 'N/A'}\n`;
+      
+      // Include either IBAN or US account details
+      if (bankDetails?.iban) {
+        paymentInstructionDetails += `IBAN: ${bankDetails.iban}\n`;
+        if (bankDetails?.bic) paymentInstructionDetails += `BIC/SWIFT: ${bankDetails.bic}\n`;
+      } else if (bankDetails?.accountNumber || bankDetails?.routingNumber) {
+        if (bankDetails?.accountNumber) paymentInstructionDetails += `Account Number: ${bankDetails.accountNumber}\n`;
+        if (bankDetails?.routingNumber) paymentInstructionDetails += `Routing Number: ${bankDetails.routingNumber}\n`;
+      }
+      
+      paymentInstructionDetails += `Bank: ${bankDetails?.bankName || 'N/A'}\n`;
+      paymentInstructionDetails += `Reference: ${invoiceData.invoiceNumber}`;
+      
       paymentNetworkParams = {
-        paymentInstruction: `Pay ${invoiceData.currency} ${formattedAmountForInstruction} via Bank Transfer.\nAccount Holder: ${invoiceData.bankDetails?.accountHolder}\nIBAN: ${invoiceData.bankDetails?.iban}\nBIC: ${invoiceData.bankDetails?.bic}\nBank: ${invoiceData.bankDetails?.bankName || 'N/A'}\nReference: ${invoiceData.invoiceNumber}`,
+        paymentInstruction: paymentInstructionDetails,
       };
     } else { // crypto
       const cryptoPaymentAddress = userWallet.address;
@@ -319,6 +362,71 @@ async function _internalCommitToRequestNetwork(invoiceId: string, userId: string
 // --- End Internal Commit Function ---
 
 export const invoiceRouter = router({
+  // Update invoice status (for company owners only)
+  updateStatus: protectedProcedure
+    .input(z.object({
+      id: z.string(), // Changed from invoiceId to id to match the expected input
+      status: z.enum(['pending', 'paid', 'canceled']),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      const userId = ctx.user.id;
+      const { id: invoiceId, status } = input;
+
+      // Get the invoice
+      const invoice = await db
+        .select()
+        .from(userRequestsTable)
+        .where(eq(userRequestsTable.id, invoiceId))
+        .limit(1);
+
+      if (!invoice[0]) {
+        throw new TRPCError({
+          code: 'NOT_FOUND',
+          message: 'Invoice not found',
+        });
+      }
+
+      // Check if user owns the recipient company
+      const { companies } = await import('@/db/schema');
+      const recipientCompanyId = invoice[0].recipientCompanyId;
+      
+      if (!recipientCompanyId) {
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message: 'This invoice is not directed to a company',
+        });
+      }
+
+      // Verify user owns the recipient company
+      const [company] = await db
+        .select()
+        .from(companies)
+        .where(and(
+          eq(companies.id, recipientCompanyId),
+          eq(companies.ownerPrivyDid, userId)
+        ))
+        .limit(1);
+
+      if (!company) {
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message: 'You do not own the company this invoice is directed to',
+        });
+      }
+
+      // Update the invoice status
+      await db
+        .update(userRequestsTable)
+        .set({ 
+          status: status as InvoiceStatus,
+          updatedAt: new Date()
+        })
+        .where(eq(userRequestsTable.id, invoiceId));
+
+      console.log(`Invoice ${invoiceId} status updated to ${status} by company owner ${userId}`);
+
+      return { success: true, invoiceId, newStatus: status };
+    }),
   // Example endpoint to list invoices
   list: protectedProcedure
     .input(
@@ -328,15 +436,67 @@ export const invoiceRouter = router({
         // Add sorting parameters
         sortBy: z.enum(['date', 'amount']).optional().default('date'),
         sortDirection: z.enum(['asc', 'desc']).optional().default('desc'),
+        filter: z.enum(['all', 'sent', 'received']).optional().default('all'),
       }),
     )
     .query(async ({ input, ctx }) => {
       const limit = input.limit ?? 50;
-      const { sortBy, sortDirection } = input;
+      const { sortBy, sortDirection, filter } = input;
       // const cursor = input.cursor; // Cursor logic removed for now
       const userId = ctx.user.id;
 
       try {
+        // Import necessary schema items
+        const { companies } = await import('@/db/schema');
+        const { inArray, isNull } = await import('drizzle-orm');
+        
+        // Get ONLY companies the user OWNS (not just member of)
+        const ownedCompanies = await db
+          .select({ id: companies.id })
+          .from(companies)
+          .where(and(
+            eq(companies.ownerPrivyDid, userId),
+            isNull(companies.deletedAt)
+          ));
+        
+        const ownedCompanyIds = ownedCompanies.map(c => c.id);
+
+        // Build query conditions based on filter
+        let queryConditions;
+        
+        if (filter === 'sent') {
+          // OUTGOING: Always show invoices I created, regardless of company ownership
+          queryConditions = eq(userRequestsTable.userId, userId);
+        } else if (filter === 'received') {
+          // INCOMING: Show invoices directed to my owned companies (created by others)
+          if (ownedCompanyIds.length === 0) {
+            // No companies = no incoming invoices
+            queryConditions = eq(userRequestsTable.id, 'no-match'); // Never matches
+          } else {
+            // Invoices to my companies that I didn't create
+            queryConditions = and(
+              inArray(userRequestsTable.recipientCompanyId, ownedCompanyIds),
+              ne(userRequestsTable.userId, userId)
+            );
+          }
+        } else {
+          // ALL: Show all invoices I created OR involving my owned companies
+          const conditions = [eq(userRequestsTable.userId, userId)]; // Always include user's invoices
+          
+          if (ownedCompanyIds.length > 0) {
+            // Also include invoices involving my companies
+            const companyCondition = or(
+              inArray(userRequestsTable.senderCompanyId, ownedCompanyIds),
+              inArray(userRequestsTable.recipientCompanyId, ownedCompanyIds)
+            );
+            if (companyCondition) {
+              conditions.push(companyCondition);
+            }
+          }
+          
+          queryConditions = conditions.length > 1 ? or(...conditions) : conditions[0];
+        }
+
         // Define sorting column and direction
         let orderByClause;
         if (sortBy === 'date') {
@@ -353,14 +513,14 @@ export const invoiceRouter = router({
         const requests = await db
           .select()
           .from(userRequestsTable)
-          .where(eq(userRequestsTable.userId, userId))
+          .where(queryConditions)
           .orderBy(orderByClause)
           .limit(limit);
 
         // Map results (adjust if schema changes are needed)
         // Assuming the existing mapping logic is sufficient
         const mappedRequests = requests.map(req => {
-          const decimals = req.currencyDecimals ?? getCurrencyConfig(req.currency || '', 'mainnet')?.decimals ?? 2; // Fallback decimals
+          const decimals = req.currencyDecimals ?? getCachedCurrencyConfig(req.currency || '', 'mainnet')?.decimals ?? 2; // Fallback decimals
           const formattedAmount = req.amount !== null && req.amount !== undefined
             ? formatUnits(req.amount, decimals)
             : '0.00';
@@ -369,11 +529,17 @@ export const invoiceRouter = router({
           // console.log(`0xHypr DEBUG - Mapping invoice ${req.id}. Original amount: ${req.amount}, Decimals: ${decimals}, Formatted: ${formattedAmount}`);
           // --- End Logging ---
 
+          // Determine invoice direction based on who created it
+          // INCOMING: someone else created it
+          // OUTGOING: I created it
+          const direction: 'sent' | 'received' = req.userId === userId ? 'sent' : 'received';
+
           return {
             ...req,
             // Format bigint amount back to string for frontend
             amount: formattedAmount,
             creationDate: req.createdAt?.toISOString(), // Ensure date is stringified
+            direction, // Add direction indicator
             // Add other transformations if needed
           };
         });
@@ -419,10 +585,22 @@ export const invoiceRouter = router({
       let dbInvoiceId: string | null = null;
 
       try {
+        const startTime = performance.now();
         console.log('0xHypr Starting invoice creation (DB only) for user:', userId);
 
-        const userProfile = await userProfileService.getOrCreateProfile(userId, userEmail);
-        const isSeller = invoiceData.sellerInfo.email === userProfile.email;
+        // Parallelize user profile operations
+        const [userProfile] = await Promise.all([
+          userProfileService.getOrCreateProfile(userId, userEmail),
+          // Pre-fetch wallet for future use (optional optimization)
+          userProfileService.getOrCreateWallet(userId).catch(err => {
+            console.warn('0xHypr Failed to pre-fetch wallet (non-critical):', err);
+            return null;
+          })
+        ]);
+        // Determine role based on which company the user is acting on behalf of
+        // If companyId is provided and matches the sender, user is acting as seller
+        // Otherwise, user is acting as buyer (receiving the invoice)
+        const isSeller = invoiceData.companyId ? true : false; // If user selected a company to send from, they're the seller
         const role: InvoiceRole = isSeller ? 'seller' : 'buyer';
 
         const clientName = isSeller
@@ -443,26 +621,35 @@ export const invoiceRouter = router({
                          ? invoiceData.network
                          : 'base';
         }
-        const selectedConfig = getCurrencyConfig(invoiceData.currency, rnNetwork);
+        const selectedConfig = getCachedCurrencyConfig(invoiceData.currency, rnNetwork);
         if (!selectedConfig) {
           throw new TRPCError({ code: 'BAD_REQUEST', message: `Unsupported currency/network combination` });
         }
         const decimals = selectedConfig.decimals;
 
-        let totalAmountDecimal = new Decimal(0);
+        // Optimize Decimal calculations by pre-creating common instances
+        const ZERO = new Decimal(0);
+        const HUNDRED = new Decimal(100);
+        let totalAmountDecimal = ZERO;
+        
         for (const item of invoiceData.invoiceItems) {
           const itemPrice = new Decimal(item.unitPrice || '0');
-          const quantity = new Decimal(item.quantity || 0);
+          const quantity = item.quantity || 0;
           const taxPercent = new Decimal(item.tax.amount || '0');
-          const itemTotal = itemPrice.times(quantity);
-          const taxAmount = itemTotal.times(taxPercent).dividedBy(100);
-          totalAmountDecimal = totalAmountDecimal.plus(itemTotal).plus(taxAmount);
+          
+          // Calculate item total and tax more efficiently
+          const itemTotal = itemPrice.mul(quantity);
+          const taxAmount = itemTotal.mul(taxPercent).div(HUNDRED);
+          totalAmountDecimal = totalAmountDecimal.plus(itemTotal.plus(taxAmount));
         }
         const totalAmountBigInt = parseUnits(totalAmountDecimal.toFixed(decimals), decimals);
 
         const requestDataForDb: NewUserRequest = {
           id: crypto.randomUUID(),
           userId: userId,
+          companyId: invoiceData.companyId || null, // The company the user is acting on behalf of
+          senderCompanyId: invoiceData.companyId || null, // Company sending the invoice (if user selected one)
+          recipientCompanyId: invoiceData.recipientCompanyId || null, // Company receiving the invoice
           role: role,
           description: description,
           amount: totalAmountBigInt,
@@ -473,16 +660,23 @@ export const invoiceRouter = router({
           invoiceData: invoiceData,
         };
 
+        const dbStartTime = performance.now();
         const newDbRecord = await userRequestService.addRequest(requestDataForDb);
+        const dbEndTime = performance.now();
+        
         if (!newDbRecord || typeof newDbRecord.id !== 'string') {
           throw new Error('Database service did not return a valid ID');
         }
         dbInvoiceId = newDbRecord.id;
-        console.log('0xHypr Successfully saved invoice to database:', dbInvoiceId);
+        console.log(`0xHypr Successfully saved invoice to database (${(dbEndTime - dbStartTime).toFixed(2)}ms):`, dbInvoiceId);
 
         // --- Start Background Commit Task ---
         // Update status to 'pending' immediately AFTER db save
+        const statusUpdateStartTime = performance.now();
         await userRequestService.updateRequest(dbInvoiceId, { status: 'pending' });
+        const statusUpdateEndTime = performance.now();
+        
+        console.log(`0xHypr Status update completed (${(statusUpdateEndTime - statusUpdateStartTime).toFixed(2)}ms)`);
 
         // Use arrow function for background task wrapper
         // const commitInvoiceInBackground = async (id: string, uid: string) => {
@@ -504,6 +698,9 @@ export const invoiceRouter = router({
         //   console.error("0xHypr Unhandled error in background commit task wrapper:", err);
         // });
         // // --- End Background Commit Task ---
+
+        const endTime = performance.now();
+        console.log(`0xHypr Invoice creation completed in ${(endTime - startTime).toFixed(2)}ms`);
 
         return {
           success: true,
@@ -548,7 +745,7 @@ export const invoiceRouter = router({
             }
 
             // Format amount before returning
-            const decimals = request.currencyDecimals ?? getCurrencyConfig(request.currency || '', 'mainnet')?.decimals ?? 2; // Fallback decimals
+            const decimals = request.currencyDecimals ?? getCachedCurrencyConfig(request.currency || '', 'mainnet')?.decimals ?? 2; // Fallback decimals
             const formattedAmount = request.amount !== null && request.amount !== undefined
               ? formatUnits(request.amount, decimals)
               : '0.00';
@@ -580,7 +777,7 @@ export const invoiceRouter = router({
         console.log(`Public access successful for invoice ${input.id} (via getByPublicIdAndToken)`);
 
         // Format amount before returning
-        const decimals = request.currencyDecimals ?? getCurrencyConfig(request.currency || '', 'mainnet')?.decimals ?? 2; // Fallback decimals
+        const decimals = request.currencyDecimals ?? getCachedCurrencyConfig(request.currency || '', 'mainnet')?.decimals ?? 2; // Fallback decimals
         const formattedAmount = request.amount !== null && request.amount !== undefined
           ? formatUnits(request.amount, decimals)
           : '0.00';
@@ -594,65 +791,7 @@ export const invoiceRouter = router({
     }),
 
   // Update invoice status endpoint
-  updateStatus: protectedProcedure
-    .input(z.object({ 
-      id: z.string().min(1), 
-      status: z.enum(validInvoiceStatuses) 
-    }))
-    .mutation(async ({ input, ctx }) => {
-      const userId = ctx.user.id;
-      const invoiceId = input.id; 
-      const newStatus = input.status;
 
-      try {
-        console.log(`0xHypr Attempting status update for invoice: ${invoiceId} to ${newStatus} by user: ${userId}`);
-
-        // Fetch the existing invoice to ensure it belongs to the user before updating
-        const existingInvoice = await userRequestService.getRequestByPrimaryKey(invoiceId);
-        if (!existingInvoice) {
-          throw new TRPCError({ code: 'NOT_FOUND', message: 'Invoice not found.' });
-        }
-        if (existingInvoice.userId !== userId) {
-          throw new TRPCError({ code: 'FORBIDDEN', message: 'You do not have permission to update this invoice.' });
-        }
-
-        // Perform the update using validated input types
-        const updated = await db
-          .update(userRequestsTable)
-          .set({ 
-            status: newStatus, 
-            updatedAt: new Date() 
-          })
-          .where(and(
-            eq(userRequestsTable.id, invoiceId), 
-            eq(userRequestsTable.userId, userId) 
-          ))
-          .returning(); 
-
-        if (!updated || updated.length === 0) {
-            console.error(`Failed to update status for invoice ${invoiceId}. Update operation returned no rows.`);
-            throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to update invoice status. Invoice might not exist or access denied.' });
-        }
-
-        console.log(`0xHypr Successfully updated status for invoice ${invoiceId} to ${newStatus}`);
-        
-        const updatedInvoice = updated[0];
-        const currency = updatedInvoice.currency ?? ''; // Provide default empty string
-        const decimals = updatedInvoice.currencyDecimals ?? getCurrencyConfig(currency, 'mainnet')?.decimals ?? 2;
-        
-        const amountBigInt: bigint | null = typeof updatedInvoice.amount === 'bigint' ? updatedInvoice.amount : null;
-        const formattedAmount = amountBigInt !== null
-            ? formatUnits(amountBigInt, decimals)
-            : '0.00';
-
-        return { ...updatedInvoice, amount: formattedAmount };
-
-      } catch (error) {
-        console.error(`Error updating status for invoice ${invoiceId} to ${newStatus}:`, error);
-        if (error instanceof TRPCError) throw error;
-        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to update invoice status.', cause: error });
-      }
-    }),
 
   /**
    * AI-powered helper: convert free-form invoice text into structured data that
@@ -667,56 +806,243 @@ export const invoiceRouter = router({
     .input(z.object({ rawText: z.string().min(10) }))
     .mutation(async ({ input }) => {
       try {
-      const { rawText } = input;
-      // Lazily import to avoid bundling openai in edge runtimes if unused.
-      const { myProvider } = await import('@/lib/ai/providers');
-      // Craft a robust system prompt so the model replies with pure JSON.
-      const systemPrompt = `You are an API that converts unstructured invoice descriptions into JSON that matches the following TypeScript interface (keys may be omitted if data is not present):\n\ninterface AIInvoicePrefill {\n  sellerInfo?: { businessName?: string; email?: string };\n  buyerInfo?: { businessName?: string; email?: string };\n  invoiceItems?: Array<{ name: string; quantity: number; unitPrice: string }>;\n  currency?: string;\n  paymentTerms?: { dueDate?: string } | string;\n  note?: string;\n}\n\nReturn ONLY valid minified JSON with no extra keys, comments or markdown. Dates should be ISO-8601 (YYYY-MM-DD). Monetary values as strings.`;
+        const { rawText } = input;
+        console.log('[AI Prefill] Starting invoice extraction from raw text:', rawText.substring(0, 100) + '...');
+        
+        // Lazily import to avoid bundling openai in edge runtimes if unused.
+        const { myProvider } = await import('@/lib/ai/providers');
+        const { generateObject } = await import('ai');
 
-      const { generateObject } = await import('ai');
+        // Create a more comprehensive schema that matches the invoice store expectations
+        // IMPORTANT: For AI SDK with o3-2025-04-16, all fields must be required with nullable() instead of optional()
+        const aiInvoiceSchema = z.object({
+          // Seller info (the company sending the invoice)
+          sellerInfo: z.object({
+            businessName: z.string().nullable(),
+            email: z.string().nullable(), // Relaxed email validation for extraction
+            address: z.string().nullable(), // Full street address
+            city: z.string().nullable(),
+            postalCode: z.string().nullable(),
+            country: z.string().nullable(),
+            phone: z.string().nullable(),
+            taxId: z.string().nullable(),
+          }).nullable(),
+          
+          // Buyer info (the company receiving/paying the invoice)
+          buyerInfo: z.object({
+            businessName: z.string().nullable(),
+            email: z.string().nullable(), // Relaxed email validation
+            address: z.string().nullable(), // Full street address
+            city: z.string().nullable(),
+            postalCode: z.string().nullable(),
+            country: z.string().nullable(),
+            contactName: z.string().nullable(),
+            phone: z.string().nullable(),
+            taxId: z.string().nullable(),
+          }).nullable(),
+          
+          // Invoice details
+          invoiceNumber: z.string().nullable(),
+          issuedAt: z.string().nullable(), // ISO date
+          dueDate: z.string().nullable(), // ISO date
+          
+          // Items - comprehensive extraction
+          invoiceItems: z.array(z.object({
+            name: z.string(), // Service/product name
+            description: z.string().nullable(), // Full description
+            quantity: z.number(),
+            unitPrice: z.string(), // As string to preserve precision
+            tax: z.number().nullable(), // Tax percentage
+            total: z.string().nullable(), // Line total if available
+          })).nullable(),
+          
+          // Financial summary
+          currency: z.string(),
+          subtotal: z.string().nullable(),
+          taxAmount: z.string().nullable(),
+          totalAmount: z.string().nullable(),
+          amount: z.number().nullable(), // Legacy field for total
+          paymentType: z.enum(['crypto', 'fiat']).nullable(),
+          
+          // Additional
+          note: z.string().nullable(),
+          terms: z.string().nullable(),
+          paymentInstructions: z.string().nullable(),
+          
+          // Bank details for fiat payments (comprehensive)
+          bankDetails: z.object({
+            accountHolder: z.string().nullable(),
+            accountNumber: z.string().nullable(),
+            routingNumber: z.string().nullable(),
+            iban: z.string().nullable(),
+            bic: z.string().nullable(),
+            swiftCode: z.string().nullable(),
+            bankName: z.string().nullable(),
+            bankAddress: z.string().nullable(),
+          }).nullable(),
+        });
 
-      const chatModel = myProvider('gpt-4.1-mini');
+        // Craft a more detailed system prompt
+        const systemPrompt = `You are an expert invoice data extraction AI. Extract ALL available structured invoice information from unstructured text. Be thorough and comprehensive.
 
-      /*
-       * We ask for a **partial** invoice object because the model will
-       * often miss some nested fields (e.g. `buyerInfo.email`).
-       * A shallow partial already relaxes the top-level keys but nested
-       * objects can still fail validation.  Instead of tightening the
-       * schema further (and depending on specific zod versions), we keep
-       * the relaxed top-level schema **and** add a graceful fallback:
-       *   – First attempt strict-ish validation with `.partial()`.
-       *   – If validation fails we parse the raw JSON from the error and
-       *     return it anyway, letting the client deal with missing keys.
-       */
-      const strictPartialSchema = invoiceDataSchema.partial();
+EXTRACTION RULES:
+1. **SELLER vs BUYER identification**:
+   - SELLER = The service provider/contractor who is billing (sends the invoice)
+   - BUYER = The client/company who needs to pay (receives the invoice)
+   - Look for labels like "From:", "Bill To:", "Seller:", "Vendor:", "Provider:"
+   - Bank details and payment instructions usually belong to the SELLER
+   
+2. **Complete Data Extraction**:
+   - Extract EVERY piece of information available
+   - Parse ALL line items with their quantities, prices, and descriptions
+   - Extract complete addresses including street, city, postal codes, countries
+   - Extract ALL contact information (emails, phones, tax IDs)
+   - Extract ALL payment details (bank names, account numbers, routing numbers, IBAN, BIC, SWIFT)
+   
+3. **Financial Data**:
+   - Extract numeric values without currency symbols (e.g., "220.00" not "€220.00")
+   - For line items: Extract exact quantities and unit prices
+   - Calculate totals if not explicitly stated
+   - Extract tax rates and amounts
+   
+4. **Date Handling**:
+   - Convert to ISO format (YYYY-MM-DD)
+   - For relative dates like "Net 30", calculate from issue date
+   - Extract both issue date and due date
+   
+5. **Address Parsing**:
+   - Split full addresses into components: street, city, postal code, country
+   - Handle formats like "850 Mission St, 5th Floor, San Francisco, CA 94103"
+   
+6. **Payment Information**:
+   - Extract complete bank details including bank names
+   - Look for account holder names
+   - Extract routing numbers, account numbers, IBAN, BIC, SWIFT codes
+   - Detect payment type: "fiat" for EUR/USD/GBP, "crypto" for USDC/ETH
+   
+7. **Line Items**:
+   - Extract ALL services/products listed
+   - Parse descriptions, quantities, unit prices, taxes
+   - Handle various formats and layouts
 
-      let aiObject: unknown;
-      try {
-        // 1️⃣ Try with the strict (but partial) schema.
-        ({ object: aiObject } = await generateObject({
-          model: chatModel,
-          schema: strictPartialSchema,
-          prompt: `${systemPrompt}\n\n${rawText}`,
-        }));
-      } catch (validationErr: any) {
-        // 2️⃣ Fallback: extract raw JSON from the error payload so that
-        //    we still return something useful instead of a 500.
+EXAMPLES OF WHAT TO EXTRACT:
+- Company names: "Orion Web Infrastructure Ltd." 
+- Addresses: Street "850 Mission St, 5th Floor", City "San Francisco", Postal "94103", Country "CA"
+- Bank details: Bank "First Horizon Bank", Routing "121000358", Account "0987654321"
+- Line items: "Dedicated VPS (8 cores, 32 GB RAM)" qty=1, price="220.00"
+
+IMPORTANT:
+- Be extremely thorough - extract every piece of data visible
+- Business names exactly as written
+- All monetary values as strings without symbols  
+- Addresses split into components when possible
+- Default currency to "USD" if not specified, but look for € € symbols for EUR
+
+Current date for reference: ${new Date().toISOString().split('T')[0]}`;
+
+        const chatModel = myProvider('gpt-4.1'); // Use gpt-4.1 as specified in CLAUDE.md for extraction
+
+        console.log('[AI Prefill] Calling AI model for extraction...');
+        
+        let aiObject: any;
         try {
-          const rawJson = validationErr?.text || validationErr?.value || '';
-          aiObject = rawJson ? JSON.parse(rawJson) : {};
-          console.warn('AI prefill – returned data did not match schema, falling back to lenient parsing.');
-        } catch (_parseErr) {
-          // If even that fails, re-throw original error so caller sees 500.
-          throw validationErr;
-        }
-      }
+          // Try with the comprehensive schema
+          const result = await generateObject({
+            model: chatModel,
+            schema: aiInvoiceSchema,
+            messages: [
+              {
+                role: 'system',
+                content: systemPrompt
+              },
+              {
+                role: 'user',
+                content: `Please extract ALL available invoice information from the following text. Be extremely thorough and extract every piece of data you can find including:
 
-      console.log('0xHypr AI prefill – returned data:', aiObject);
+1. Complete seller/vendor information (name, address, email, phone, tax ID)
+2. Complete buyer/client information (name, address, email, contact person)  
+3. All invoice details (number, dates, terms)
+4. Every line item with exact descriptions, quantities, and prices
+5. All financial totals (subtotal, tax, total)
+6. Complete payment/banking information (bank name, account details, routing numbers)
+7. Any additional notes or payment instructions
+
+INVOICE TEXT TO EXTRACT FROM:
+${rawText}
+
+Extract everything comprehensively - leave no data behind!`
+              }
+            ],
+          });
+          
+          aiObject = result.object;
+          console.log('[AI Prefill] Successfully extracted data:', JSON.stringify(aiObject, null, 2));
+          
+        } catch (validationErr: any) {
+          console.error('[AI Prefill] Validation error:', validationErr);
+          
+          // Fallback: try to extract basic info with a simpler approach
+          try {
+            const simpleSchema = z.object({
+              sellerInfo: z.object({
+                businessName: z.string().nullable(),
+                email: z.string().nullable(),
+              }).nullable(),
+              buyerInfo: z.object({
+                businessName: z.string().nullable(),
+                email: z.string().nullable(),
+              }).nullable(),
+              amount: z.number().nullable(),
+              currency: z.string().nullable(),
+              dueDate: z.string().nullable(),
+              note: z.string().nullable(),
+            });
+            
+            const fallbackResult = await generateObject({
+              model: myProvider('gpt-4.1'), // Use gpt-4.1 for fallback too
+              schema: simpleSchema,
+              messages: [
+                {
+                  role: 'system',
+                  content: 'Extract basic invoice information: seller name/email, buyer name/email, amount, currency, due date.'
+                },
+                {
+                  role: 'user',
+                  content: rawText
+                }
+              ],
+            });
+            
+            aiObject = fallbackResult.object;
+            console.warn('[AI Prefill] Using fallback extraction:', aiObject);
+            
+          } catch (fallbackErr) {
+            console.error('[AI Prefill] Fallback also failed:', fallbackErr);
+            throw validationErr;
+          }
+        }
+
+        // Log what we're returning
+        console.log('[AI Prefill] Final extracted data being returned:', {
+          hasSellerInfo: !!aiObject.sellerInfo,
+          hasBuyerInfo: !!aiObject.buyerInfo,
+          itemCount: aiObject.invoiceItems?.length || 0,
+          amount: aiObject.amount,
+          currency: aiObject.currency,
+        });
+
         return aiObject;
+        
       } catch (error) {
-        console.error('Error in prefillFromRaw:', error);
-        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to prefill invoice from raw text.', cause: error });
+        console.error('[AI Prefill] Error in prefillFromRaw:', error);
+        throw new TRPCError({ 
+          code: 'INTERNAL_SERVER_ERROR', 
+          message: 'Failed to prefill invoice from raw text.', 
+          cause: error 
+        });
       }
     }),
+
+
 
 });

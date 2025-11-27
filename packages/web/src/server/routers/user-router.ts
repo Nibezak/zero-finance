@@ -1,7 +1,7 @@
 import { z } from 'zod';
 // import { createTRPCRouter, protectedProcedure } from '@/server/trpc';
 import { db } from '@/db';
-import { users, userProfilesTable, userSafes } from '@/db/schema';
+import { users, userProfilesTable, userSafes, workspaces } from '@/db/schema';
 import { eq, and } from 'drizzle-orm';
 import type { Context } from '@/server/context';
 import { protectedProcedure, router, publicProcedure } from '../create-router';
@@ -50,9 +50,9 @@ async function getOrCreateUserProfile(privyDid: string, email?: string) {
 }
 
 export const userRouter = router({
-  syncContactToLoops: protectedProcedure
+  syncContactToLoops: publicProcedure
     .input(SyncInputSchema)
-    .mutation(async ({ ctx, input }: { ctx: Context; input: SyncInput }) => {
+    .mutation(async ({ input }: { input: SyncInput }) => {
       const { privyUserId, email, name } = input;
       const loopsApiKey = process.env.LOOPS_API_KEY;
 
@@ -147,7 +147,12 @@ export const userRouter = router({
     // For now, this example assumes email might not be directly in ctx.user
     // const email = ctx.user?.email; // Hypothetical: if Privy user object had email
     const userProfile = await getOrCreateUserProfile(privyDid /*, email */);
-    return userProfile;
+    // Ensure insurance fields are included
+    return {
+      ...userProfile,
+      isInsured: userProfile.isInsured || false,
+      insuranceActivatedAt: userProfile.insuranceActivatedAt || null,
+    };
   }),
 
   // Update user profile (e.g., primary safe address, business name)
@@ -186,16 +191,23 @@ export const userRouter = router({
     }),
 
   // New procedure to get the primary safe address
+  // Workspace-centric: Returns the primary safe for the current workspace,
+  // regardless of which user created it. All workspace members share access.
   getPrimarySafeAddress: protectedProcedure.query(async ({ ctx }) => {
-    const privyDid = ctx.userId;
-    if (!privyDid) {
-      throw new TRPCError({ code: 'UNAUTHORIZED' });
+    const workspaceId = ctx.workspaceId;
+    if (!workspaceId) {
+      throw new TRPCError({
+        code: 'INTERNAL_SERVER_ERROR',
+        message: 'Workspace context is unavailable.',
+      });
     }
 
+    // Query by workspace only - all workspace members share access to the workspace's primary Safe
     const primarySafe = await db.query.userSafes.findFirst({
       where: and(
-        eq(userSafes.userDid, privyDid),
         eq(userSafes.safeType, 'primary'),
+        eq(userSafes.workspaceId, workspaceId),
+        eq(userSafes.chainId, 8453), // Base chain
       ),
       columns: {
         safeAddress: true,
@@ -211,13 +223,23 @@ export const userRouter = router({
     if (!privyDid) {
       throw new TRPCError({ code: 'UNAUTHORIZED' });
     }
-    const user = await db.query.users.findFirst({
-      where: eq((users as any).privyDid, privyDid),
+
+    const workspaceId = ctx.workspaceId;
+    if (!workspaceId) {
+      throw new TRPCError({
+        code: 'INTERNAL_SERVER_ERROR',
+        message: 'Workspace context is unavailable.',
+      });
+    }
+
+    const workspace = await db.query.workspaces.findFirst({
+      where: eq(workspaces.id, workspaceId),
       columns: {
         kycStatus: true,
       },
     });
-    return { status: (user as any)?.kycStatus || null };
+
+    return { status: workspace?.kycStatus || null };
   }),
 
   // Example: Check if user exists (publicly accessible)
@@ -229,4 +251,24 @@ export const userRouter = router({
       });
       return { exists: !!user };
     }),
+
+  // Activate insurance for user (removes all warnings)
+  activateInsurance: protectedProcedure.mutation(async ({ ctx }) => {
+    const privyDid = ctx.userId;
+    if (!privyDid) {
+      throw new TRPCError({ code: 'UNAUTHORIZED' });
+    }
+
+    // Update the user profile to set isInsured = true
+    await db
+      .update(userProfilesTable)
+      .set({
+        isInsured: true,
+        insuranceActivatedAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .where(eq(userProfilesTable.privyDid, privyDid));
+
+    return { success: true, message: 'Insurance activated successfully' };
+  }),
 });

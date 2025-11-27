@@ -1,6 +1,8 @@
 # See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
 dist
 
+/.docs
+
 /.turbo
 
 # dependencies
@@ -56,3 +58,18 @@ build/
 node-compile-cache/
 
 memory/outreach-log.md
+.vercel
+
+# Local database files
+# Ignore all data directories
+data/
+# But don't ignore the companies.json file
+!packages/weloveyourstartup/src/data/companies.json
+
+# Claude settings
+.claude/settings.local.json
+**/settings.local.json
+
+# Research documentation
+research/
+.claude/settings.local.json

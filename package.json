@@ -4,12 +4,20 @@
   "private": true,
   "scripts": {
     "build": "turbo run build",
+    "build:lite": "turbo run build:lite",
+    "cli": "pnpm --filter @zero-finance/cli start",
+    "zero": "pnpm --filter @zero-finance/cli start",
+    "zero:dev": "pnpm --filter @zero-finance/cli dev",
     "clean": "git clean -xdf node_modules",
     "clean:workspaces": "turbo run clean",
     "db:push": "turbo -F @acme/db push",
     "db:studio": "turbo -F @acme/db studio",
     "dev": "concurrently \"turbo watch dev --continue\" \"pnpm --filter web db:studio\"",
+    "dev:lite": "turbo run dev:lite --continue",
     "dev:next": "turbo watch dev -F @acme/nextjs...",
+    "lite": "docker compose -f docker-compose.lite.yml up -d && sleep 3 && pnpm --filter web db:migrate:lite && pnpm dev:lite",
+    "lite:stop": "docker compose -f docker-compose.lite.yml down",
+    "lite:clean": "docker compose -f docker-compose.lite.yml down -v",
     "format": "turbo run format --continue -- --cache --cache-location .cache/.prettiercache",
     "format:fix": "turbo run format --continue -- --write --cache --cache-location .cache/.prettiercache",
     "lint": "turbo run lint --continue -- --cache --cache-location .cache/.eslintcache",
@@ -23,6 +31,8 @@
     "concurrently": "^9.1.2",
     "knip": "^5.49.0",
     "prettier": "catalog:",
+    "react-qr-code": "^2.0.15",
+    "tsx": "^4.20.6",
     "turbo": "^2.3.4",
     "typescript": "catalog:",
     "wait-on": "^8.0.1"
@@ -34,8 +44,5 @@
     "node": ">=22.11.0",
     "pnpm": "^9.15.4"
   },
-  "packageManager": "pnpm@9.15.4",
-  "dependencies": {
-    "react-qr-code": "^2.0.15"
-  }
+  "packageManager": "pnpm@9.15.4"
 }

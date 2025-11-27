@@ -1,49 +1,22 @@
-'use client';
-
-import React from 'react';
-import { usePrivy } from '@privy-io/react-auth';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { LogIn } from 'lucide-react';
+import React, { Suspense } from 'react';
+import SignInContent from '@/app/(public)/signin/signin-content';
+import GeneratedComponent from '@/app/(landing)/welcome-gradient';
+import { Loader2 } from 'lucide-react';
 
 export default function SignInPage() {
-  const { login, authenticated, user } = usePrivy();
-
-  // Redirect to dashboard if already authenticated
-  React.useEffect(() => {
-    if (authenticated) {
-      // Use window.location for simple redirect outside Next router if needed,
-      // or ideally use useRouter from next/navigation if this component is
-      // within a Next.js layout that provides the router context.
-      window.location.href = '/dashboard';
-    }
-  }, [authenticated]);
-
   return (
-    <div className="flex items-center justify-center min-h-screen bg-gray-50">
-      <Card className="w-full max-w-sm">
-        <CardHeader className="text-center">
-          <CardTitle className="text-2xl">Sign In</CardTitle>
-          <CardDescription>Access your Zero Finance dashboard.</CardDescription>
-        </CardHeader>
-        <CardContent className="flex flex-col items-center">
-          {/* Display minimal user info if somehow the page is hit while logged in before redirect */}
-          {authenticated && user && (
-            <p className="text-sm text-gray-600 mb-4">Already signed in as {user.email?.address ?? 'your account'}. Redirecting...</p>
-          )}
-          
-          {/* Only show button if not authenticated */}
-          {!authenticated && (
-            <Button 
-              onClick={login}
-              className="w-full bg-gray-900 text-white hover:bg-gray-800"
-            >
-              <LogIn className="mr-2 h-4 w-4" />
-              Sign In / Sign Up
-            </Button>
-          )}
-        </CardContent>
-      </Card>
-    </div>
+    <Suspense
+      fallback={
+        <section className="relative min-h-screen border-y border-[#101010]/10 bg-white/90 overflow-hidden flex items-center justify-center">
+          <GeneratedComponent className="z-0 bg-[#F6F5EF]" />
+          <div className="relative z-10 flex items-center gap-3">
+            <Loader2 className="h-5 w-5 animate-spin text-[#1B29FF]" />
+            <span className="text-[14px] text-[#101010]/70">Loading...</span>
+          </div>
+        </section>
+      }
+    >
+      <SignInContent />
+    </Suspense>
   );
-} 
+}

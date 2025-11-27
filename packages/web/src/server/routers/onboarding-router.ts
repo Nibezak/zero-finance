@@ -2,11 +2,13 @@ import { z } from 'zod';
 import { router, protectedProcedure } from '../create-router';
 import { TRPCError } from '@trpc/server';
 import { db } from '@/db/index';
-import { userProfilesTable, userSafes, users } from '@/db/schema';
+import { userProfilesTable, userSafes, users, workspaces } from '@/db/schema';
 import { alignRouter } from './align-router';
+import { earnRouter } from './earn-router';
 import { eq, and } from 'drizzle-orm';
 import { type Address } from 'viem';
-// import { AlignService } from '../services/align-service';
+import { AUTO_EARN_MODULE_ADDRESS } from '@/lib/earn-module-constants';
+import { featureConfig } from '@/lib/feature-config';
 
 export const onboardingRouter = router({
   /**
@@ -15,21 +17,19 @@ export const onboardingRouter = router({
    */
   getOnboardingStatus: protectedProcedure.query(async ({ ctx }) => {
     const userId = ctx.user.id;
+    const workspaceId = ctx.workspaceId;
+
     try {
-      // 1. Check for a primary safe in the new userSafes table
+      // 1. Check for a primary safe in the new userSafes table (workspace-scoped)
       const primarySafe = await db.query.userSafes.findFirst({
         where: (table) =>
-          eq(table.userDid, userId) && eq(table.safeType, 'primary'),
+          workspaceId
+            ? eq(table.userDid, userId) &&
+              eq(table.safeType, 'primary') &&
+              eq(table.workspaceId, workspaceId)
+            : eq(table.userDid, userId) && eq(table.safeType, 'primary'),
       });
 
-      if (primarySafe) {
-        return {
-          skippedOrCompletedOnboardingStepper: true,
-          primarySafeAddress: primarySafe.safeAddress,
-        };
-      }
-
-      // 2. Fallback to the old user_profiles table for legacy users
       const profile = await db.query.userProfilesTable.findFirst({
         where: eq(userProfilesTable.privyDid, userId),
         columns: {
@@ -38,6 +38,15 @@ export const onboardingRouter = router({
         },
       });
 
+      if (primarySafe) {
+        return {
+          skippedOrCompletedOnboardingStepper: true,
+          primarySafeAddress: primarySafe.safeAddress,
+          onboardingCompletedFlag:
+            profile?.skippedOrCompletedOnboardingStepper ?? false,
+        };
+      }
+
       if (profile?.primarySafeAddress && !primarySafe) {
         // Found a legacy user, let's sync them to the new tables
         console.log(
@@ -45,10 +54,12 @@ export const onboardingRouter = router({
         );
         try {
           // Ensure user exists in users table
-          await db
-            .insert(users)
-            .values({ privyDid: userId })
-            .onConflictDoNothing();
+          if (workspaceId) {
+            await db
+              .insert(users)
+              .values({ privyDid: userId, primaryWorkspaceId: workspaceId })
+              .onConflictDoNothing();
+          }
           // Insert safe into userSafes table
           await db
             .insert(userSafes)
@@ -67,6 +78,8 @@ export const onboardingRouter = router({
         skippedOrCompletedOnboardingStepper:
           !!profile?.skippedOrCompletedOnboardingStepper,
         primarySafeAddress: profile?.primarySafeAddress,
+        onboardingCompletedFlag:
+          profile?.skippedOrCompletedOnboardingStepper ?? false,
       };
     } catch (error) {
       console.error('Error fetching onboarding status:', error);
@@ -94,43 +107,57 @@ export const onboardingRouter = router({
       const userId = ctx.user.id;
       const { primarySafeAddress } = input;
       const userEmail = ctx.user.email?.address;
+      const workspaceId = ctx.workspaceId;
+
+      if (!workspaceId) {
+        throw new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message: 'Workspace context is unavailable.',
+        });
+      }
 
       try {
         // Upsert into `users` table first
         await db
           .insert(users)
-          .values({ privyDid: userId })
+          .values({ privyDid: userId, primaryWorkspaceId: workspaceId })
           .onConflictDoNothing();
 
-        // Upsert into `user_profiles` table
+        // Upsert into `user_profiles` table (with workspace)
         await db
           .insert(userProfilesTable)
           .values({
             privyDid: userId,
             email: userEmail,
+            workspaceId: workspaceId,
             primarySafeAddress: primarySafeAddress,
             skippedOrCompletedOnboardingStepper: true,
           })
           .onConflictDoUpdate({
             target: userProfilesTable.privyDid,
             set: {
+              workspaceId: workspaceId,
               primarySafeAddress: primarySafeAddress,
               skippedOrCompletedOnboardingStepper: true,
               updatedAt: new Date(),
             },
           });
 
-        // Upsert into `userSafes` table
+        // Upsert into `userSafes` table (with workspace)
         await db
           .insert(userSafes)
           .values({
             userDid: userId,
+            workspaceId: workspaceId,
             safeAddress: primarySafeAddress,
             safeType: 'primary',
           })
           .onConflictDoUpdate({
             target: [userSafes.userDid, userSafes.safeType],
-            set: { safeAddress: primarySafeAddress },
+            set: {
+              safeAddress: primarySafeAddress,
+              workspaceId: workspaceId,
+            },
           });
 
         return { success: true };
@@ -182,6 +209,7 @@ export const onboardingRouter = router({
 
   /**
    * Gets the status of each step in the onboarding flow.
+   * Simplified to match the new onboarding UI with just 2 main steps.
    */
   getOnboardingSteps: protectedProcedure.query(async ({ ctx }) => {
     const privyDid = ctx.userId;
@@ -189,8 +217,16 @@ export const onboardingRouter = router({
       throw new TRPCError({ code: 'UNAUTHORIZED' });
     }
 
-    const userPromise = db.query.users.findFirst({
-      where: eq(users.privyDid, privyDid),
+    const workspaceId = ctx.workspaceId;
+    if (!workspaceId) {
+      throw new TRPCError({
+        code: 'INTERNAL_SERVER_ERROR',
+        message: 'Workspace context is unavailable.',
+      });
+    }
+
+    const workspacePromise = db.query.workspaces.findFirst({
+      where: eq(workspaces.id, workspaceId),
       columns: { kycMarkedDone: true, kycSubStatus: true },
     });
 
@@ -198,30 +234,53 @@ export const onboardingRouter = router({
       where: and(
         eq(userSafes.userDid, privyDid),
         eq(userSafes.safeType, 'primary'),
+        eq(userSafes.workspaceId, workspaceId),
       ),
       columns: { safeAddress: true },
     });
 
-    // We get user from context, so we know email exists if they are authenticated
-    const userEmail = ctx.user?.email;
+    // Only fetch Align data if it's enabled
+    let alignCustomer = null;
+    if (featureConfig.align.enabled) {
+      const alignCaller = alignRouter.createCaller(ctx);
+      alignCustomer = await alignCaller.getCustomerStatus();
+    }
 
-    const alignCaller = alignRouter.createCaller(ctx);
-    const alignCustomerPromise = alignCaller.getCustomerStatus();
-
-    const [user, primarySafe, alignCustomer] = await Promise.all([
-      userPromise,
+    const [workspace, primarySafe] = await Promise.all([
+      workspacePromise,
       primarySafePromise,
-      alignCustomerPromise,
     ]);
 
-    const kycStatus =
-      alignCustomer && alignCustomer.kycStatus
+    const kycStatus = featureConfig.align.enabled
+      ? alignCustomer && alignCustomer.kycStatus
         ? alignCustomer.kycStatus
-        : 'not_started';
+        : 'not_started'
+      : 'not_required';
     const kycSubStatus = alignCustomer?.kycSubStatus;
     const hasBankAccount = !!alignCustomer?.alignVirtualAccountId;
-    const hasEmail = !!userEmail;
-    const kycMarkedDone = user?.kycMarkedDone ?? false;
+    const kycMarkedDone = workspace?.kycMarkedDone ?? false;
+
+    // Check if savings account is enabled
+    let hasSavingsAccount = false;
+    if (primarySafe?.safeAddress) {
+      try {
+        const earnCaller = earnRouter.createCaller(ctx);
+        const [moduleStatus, initStatus] = await Promise.all([
+          earnCaller.isSafeModuleActivelyEnabled({
+            safeAddress: primarySafe.safeAddress as Address,
+            moduleAddress: AUTO_EARN_MODULE_ADDRESS,
+          }),
+          earnCaller.getEarnModuleOnChainInitializationStatus({
+            safeAddress: primarySafe.safeAddress as Address,
+          }),
+        ]);
+        hasSavingsAccount =
+          (moduleStatus?.isEnabled || false) &&
+          (initStatus?.isInitializedOnChain || false);
+      } catch (error) {
+        console.error('Error checking savings account status:', error);
+      }
+    }
 
     const steps = {
       createSafe: {
@@ -230,16 +289,22 @@ export const onboardingRouter = router({
       },
       verifyIdentity: {
         isCompleted: kycStatus === 'approved',
-        status:
-          (kycStatus as
-            | 'pending'
-            | 'approved'
-            | 'rejected'
-            | 'not_started'
-            | 'none'),
+        status: kycStatus as
+          | 'pending'
+          | 'approved'
+          | 'rejected'
+          | 'not_started'
+          | 'none',
         kycMarkedDone,
         kycSubStatus,
       },
+      openSavings: {
+        isCompleted: hasSavingsAccount,
+        status: hasSavingsAccount
+          ? ('completed' as const)
+          : ('not_started' as const),
+      },
+      // Keep setupBankAccount for backward compatibility but it's not shown in UI
       setupBankAccount: {
         isCompleted: hasBankAccount,
         status: hasBankAccount
@@ -248,11 +313,152 @@ export const onboardingRouter = router({
       },
     };
 
-    const isCompleted = Object.values(steps).every((step) => step.isCompleted);
+    // Onboarding is complete when:
+    // - Safe is created
+    // - KYC is approved (if required)
+    // - Savings is opened (if enabled)
+    const isCompleted =
+      steps.createSafe.isCompleted &&
+      (!featureConfig.kyc.required || steps.verifyIdentity.isCompleted) &&
+      (!featureConfig.earn.enabled || steps.openSavings.isCompleted);
 
     return {
       steps,
       isCompleted,
     };
   }),
-});  
+
+  /**
+   * Gets onboarding tasks formatted for the dashboard empty state
+   */
+  getOnboardingTasks: protectedProcedure.query(async ({ ctx }) => {
+    const privyDid = ctx.userId;
+    if (!privyDid) {
+      throw new TRPCError({ code: 'UNAUTHORIZED' });
+    }
+
+    // Reuse the logic from getOnboardingSteps
+    const workspaceId = ctx.workspaceId;
+    if (!workspaceId) {
+      throw new TRPCError({
+        code: 'INTERNAL_SERVER_ERROR',
+        message: 'Workspace context is unavailable.',
+      });
+    }
+
+    const workspacePromise = db.query.workspaces.findFirst({
+      where: eq(workspaces.id, workspaceId),
+      columns: { kycMarkedDone: true, kycSubStatus: true },
+    });
+
+    const primarySafePromise = db.query.userSafes.findFirst({
+      where: and(
+        eq(userSafes.userDid, privyDid),
+        eq(userSafes.safeType, 'primary'),
+        eq(userSafes.workspaceId, workspaceId),
+      ),
+      columns: { safeAddress: true },
+    });
+
+    // Only fetch Align data if it's enabled
+    let alignCustomer = null;
+    if (featureConfig.align.enabled) {
+      const alignCaller = alignRouter.createCaller(ctx);
+      alignCustomer = await alignCaller.getCustomerStatus();
+    }
+
+    const [workspace, primarySafe] = await Promise.all([
+      workspacePromise,
+      primarySafePromise,
+    ]);
+
+    const alignKycStatus = featureConfig.align.enabled
+      ? alignCustomer && alignCustomer.kycStatus
+        ? alignCustomer.kycStatus
+        : 'not_started'
+      : 'not_required';
+    const kycSubStatus = alignCustomer?.kycSubStatus;
+    const kycMarkedDone = workspace?.kycMarkedDone ?? false;
+
+    // Check if savings account is enabled
+    let hasSavingsAccount = false;
+    if (primarySafe?.safeAddress) {
+      try {
+        const earnCaller = earnRouter.createCaller(ctx);
+        const [moduleStatus, initStatus] = await Promise.all([
+          earnCaller.isSafeModuleActivelyEnabled({
+            safeAddress: primarySafe.safeAddress as Address,
+            moduleAddress: AUTO_EARN_MODULE_ADDRESS,
+          }),
+          earnCaller.getEarnModuleOnChainInitializationStatus({
+            safeAddress: primarySafe.safeAddress as Address,
+          }),
+        ]);
+        hasSavingsAccount =
+          (moduleStatus?.isEnabled || false) &&
+          (initStatus?.isInitializedOnChain || false);
+      } catch (error) {
+        console.error('Error checking savings account status:', error);
+      }
+    }
+
+    const tasks = [];
+    const isSafeComplete = !!primarySafe;
+    const isKycApproved = alignKycStatus === 'approved';
+
+    // Task 1: Activate Primary Account
+    tasks.push({
+      id: 'activate-account',
+      title: 'Activate Primary Account',
+      description: 'Set up your secure smart account to get started',
+      status: isSafeComplete ? 'completed' : 'pending',
+      action: '/onboarding/create-safe',
+    });
+
+    // Task 2: Verify Identity
+    let kycTaskStatus = 'pending';
+    if (isKycApproved) {
+      kycTaskStatus = 'completed';
+    } else if (alignKycStatus === 'pending' || kycMarkedDone) {
+      kycTaskStatus = 'in_progress';
+    } else if (alignKycStatus === 'rejected') {
+      kycTaskStatus = 'failed';
+    }
+
+    tasks.push({
+      id: 'verify-identity',
+      title: 'Verify Identity',
+      description: isKycApproved
+        ? 'Your identity has been verified'
+        : alignKycStatus === 'pending' || kycMarkedDone
+          ? 'Verification in progress'
+          : alignKycStatus === 'rejected'
+            ? 'Verification failed - please retry'
+            : 'Complete KYC to unlock all features',
+      status: kycTaskStatus,
+      action: '/onboarding/kyc',
+    });
+
+    // Task 3: Open Savings Account (show after KYC)
+    if (isKycApproved) {
+      tasks.push({
+        id: 'open-savings',
+        title: 'Open Savings Account',
+        description: hasSavingsAccount
+          ? 'Your savings account is active - earning 8% APY'
+          : 'Activate savings to earn 8% APY on idle funds',
+        status: hasSavingsAccount ? 'completed' : 'pending',
+        action: '/dashboard/earn',
+        actionType: hasSavingsAccount ? undefined : 'open-savings', // Special flag for custom action
+      });
+    }
+
+    return {
+      tasks,
+      isCompleted: isSafeComplete && isKycApproved && hasSavingsAccount,
+      completedCount: tasks.filter((t) => t.status === 'completed').length,
+      totalCount: tasks.length,
+      primarySafeAddress: primarySafe?.safeAddress, // Include safe address for actions
+    };
+  }),
+});

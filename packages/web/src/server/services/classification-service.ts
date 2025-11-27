@@ -6,20 +6,22 @@ import { userClassificationSettings } from '@/db/schema';
 import { eq, and, asc } from 'drizzle-orm';
 import type { AiProcessedDocument } from './ai-service';
 
-// Schema for classification results
+// Schema for classification results (AI SDK 5.0 compatible)
 export const classificationResultSchema = z.object({
   matchedRules: z.array(z.object({
     ruleName: z.string(),
     ruleId: z.string(),
     confidence: z.number().min(0).max(100),
     actions: z.array(z.object({
-      type: z.enum(['approve', 'mark_paid', 'add_category', 'add_note', 'set_expense_category']),
-      value: z.string().optional(),
+      type: z.enum(['approve', 'mark_paid', 'add_category', 'add_note', 'set_expense_category', 'dismiss', 'mark_seen', 'schedule_payment']),
+      value: z.string().nullable(), // Changed from optional() to nullable() for AI SDK 5.0 compatibility
     })),
   })),
   suggestedCategories: z.array(z.string()),
   shouldAutoApprove: z.boolean(),
   shouldMarkPaid: z.boolean(),
+  shouldSchedulePayment: z.boolean(),
+  paymentDelayDays: z.number().nullable(),
   expenseCategory: z.string().nullable(),
   additionalNotes: z.string().nullable(),
   overallConfidence: z.number().min(0).max(100),
@@ -54,6 +56,8 @@ export async function applyClassificationRules(
         suggestedCategories: [],
         shouldAutoApprove: false,
         shouldMarkPaid: false,
+        shouldSchedulePayment: false,
+        paymentDelayDays: null,
         expenseCategory: null,
         additionalNotes: null,
         overallConfidence: 0,
@@ -80,7 +84,7 @@ ${sourceText ? `Original Text:\n${sourceText.substring(0, 1000)}${sourceText.len
 `;
 
     const { object: classificationResult } = await generateObject({
-      model: openai('gpt-4o-mini'),
+      model: openai('o3-2025-04-16'),
       schema: classificationResultSchema,
       messages: [
         {
@@ -89,10 +93,13 @@ ${sourceText ? `Original Text:\n${sourceText.substring(0, 1000)}${sourceText.len
 
 IMPORTANT: Each rule may specify multiple actions. Common actions include:
 - "approve" or "auto-approve": Mark the document as automatically approved
+- "dismiss" or "ignore": Automatically dismiss the document (e.g., for spam, promotions)
+- "mark as seen" or "mark seen": Mark the document as seen/reviewed without further action
 - "mark as paid": Set the payment status to paid
 - "categorize as [category]": Add a specific category tag
 - "add to expenses": Mark for expense tracking
 - "set expense category": Set a specific expense category
+- "schedule payment": Schedule an automatic payment (specify delay days like "schedule payment in 2 days")
 
 USER CLASSIFICATION RULES:
 ${rulesSection}
@@ -103,9 +110,11 @@ INSTRUCTIONS:
 3. Extract specific categories mentioned in the rules (e.g., "dev tools", "office supplies", "travel")
 4. Set shouldAutoApprove=true if ANY rule mentions auto-approval
 5. Set shouldMarkPaid=true if ANY rule mentions marking as paid
-6. Suggest relevant categories based on the document and matching rules
-7. Provide confidence scores for each match
-8. If a rule mentions expense categories, extract them to expenseCategory field`,
+6. Set shouldSchedulePayment=true if ANY rule mentions payment scheduling
+7. Extract payment delay days from rules (e.g., "2 business days" -> paymentDelayDays: 2)
+8. Suggest relevant categories based on the document and matching rules
+9. Provide confidence scores for each match
+10. If a rule mentions expense categories, extract them to expenseCategory field`,
         },
         {
           role: 'user',
@@ -126,6 +135,8 @@ ${documentSummary}`,
       suggestedCategories: [],
       shouldAutoApprove: false,
       shouldMarkPaid: false,
+      shouldSchedulePayment: false,
+      paymentDelayDays: null,
       expenseCategory: null,
       additionalNotes: null,
       overallConfidence: 0,
@@ -137,59 +148,8 @@ ${documentSummary}`,
  * Convert classification results to inbox card fields
  */
 export function applyClassificationToCard(
-  classification: ClassificationResult,
-  card: any
+  _classification: ClassificationResult,
+  card: any,
 ): any {
-  // Apply auto-approval
-  if (classification.shouldAutoApprove) {
-    card.status = 'auto';
-    card.requiresAction = false;
-    card.suggestedActionLabel = 'Auto-approved';
-  }
-
-  // Apply payment status
-  if (classification.shouldMarkPaid) {
-    card.paymentStatus = 'paid';
-    card.paidAt = new Date();
-  }
-
-  // Apply categories
-  const categories = new Set<string>();
-  
-  // Add categories from matched rules
-  classification.matchedRules.forEach(rule => {
-    rule.actions.forEach(action => {
-      if (action.type === 'add_category' && action.value) {
-        categories.add(action.value);
-      }
-    });
-  });
-  
-  // Add suggested categories
-  classification.suggestedCategories.forEach(cat => categories.add(cat));
-  
-  if (categories.size > 0) {
-    card.categories = Array.from(categories);
-  }
-
-  // Apply expense category
-  if (classification.expenseCategory) {
-    card.expenseCategory = classification.expenseCategory;
-    card.addedToExpenses = true;
-    card.expenseAddedAt = new Date();
-  }
-
-  // Track classification application
-  card.appliedClassifications = classification.matchedRules.map(rule => ({
-    id: rule.ruleId,
-    name: rule.ruleName,
-    matched: true,
-    confidence: rule.confidence,
-    actions: rule.actions,
-  }));
-  
-  card.classificationTriggered = classification.matchedRules.length > 0;
-  card.autoApproved = classification.shouldAutoApprove;
-
   return card;
-} 
+}

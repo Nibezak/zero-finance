@@ -1,12 +1,33 @@
 {
+  "$schema": "https://vercel.com/schemas/project.json",
+  "ignoreCommand": "npx turbo-ignore --fallback=HEAD~1",
+  "buildCommand": "pnpm build:vercel",
+  "installCommand": "cd ../.. && pnpm install --filter=@zero-finance/web --frozen-lockfile --ignore-scripts --shamefully-hoist",
+  "framework": "nextjs",
+  "functions": {
+    "app/**/*.ts": {
+      "maxDuration": 60
+    },
+    "app/api/**/*.ts": {
+      "maxDuration": 60
+    }
+  },
   "crons": [
     {
       "path": "/api/cron/auto-earn",
-      "schedule": "*/15 * * * *"
+      "schedule": "*/1 * * * *"
     },
     {
       "path": "/api/cron/process-gmail-sync",
       "schedule": "*/2 * * * *"
+    },
+    {
+      "path": "/api/cron/kyc-notifications",
+      "schedule": "*/10 * * * *"
+    },
+    {
+      "path": "/api/cron/virtual-account-sync",
+      "schedule": "*/30 * * * *"
     }
   ]
 }

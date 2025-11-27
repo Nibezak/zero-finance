@@ -1,56 +1,31 @@
 'use client';
 
-import React, { useState, useRef } from 'react';
-import { InvoiceForm } from '@/components/invoice/invoice-form';
+import React from 'react';
+import { SimpleInvoiceForm } from '@/components/invoice/simple-invoice-form';
 import { Toaster } from 'sonner';
-import { ClientDragPrevention } from '@/components/invoice/client-drag-prevention';
 import { AuthGuard } from '@/components/auth/auth-guard';
-import { RawTextPrefill } from '@/components/invoice/raw-text-prefill';
 
 export default function CreateInvoicePage() {
-  // Reference to the invoice form
-  const invoiceFormRef = useRef<any>(null);
-
   return (
     <AuthGuard>
-      <ClientDragPrevention>
-        <div className="w-full min-h-screen">
-          <Toaster richColors />
-          
+      <div className="w-full min-h-screen bg-[#F7F7F2]">
+        <Toaster richColors />
 
-          <div className="flex flex-row gap-4 h-screen">
-            {/* Invoice Form - Left Side */}
-            <div className="flex-1 overflow-y-auto pb-8 relative">
+        <div className="max-w-[1200px] mx-auto px-4 sm:px-6 lg:px-8 py-8 sm:py-12">
+          <div className="mb-6">
+            <p className="uppercase tracking-[0.14em] text-[11px] text-[#101010]/60">
+              INVOICES
+            </p>
+            <h1 className="mt-2 font-serif text-[32px] sm:text-[40px] leading-[1.1] tracking-[-0.01em] text-[#101010]">
+              Create Invoice
+            </h1>
+          </div>
 
-              
-              {/* Form container */}
-              <div 
-                className="relative"
-                onDragOver={(e) => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                }}
-                onDrop={(e) => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                }}
-              >
-                {/* Document upload zone for drag-and-drop */}
-                {/* <DocumentUploadZone /> */}
-                
-                {/* Form component */}
-                <InvoiceForm ref={invoiceFormRef} />
-              </div>
-            </div>
-            
-            {/* Raw Text Prefill - Right Side */}
-            <div className="w-[30%] max-w-md overflow-y-auto pb-8 pr-2">
-              {/* Spacer on small screens maybe hide? Use responsive classes if needed */}
-              <RawTextPrefill />
-            </div>
+          <div className="bg-white border border-[#101010]/10 rounded-[12px] shadow-[0_2px_8px_rgba(16,16,16,0.04)] p-6">
+            <SimpleInvoiceForm />
           </div>
         </div>
-      </ClientDragPrevention>
+      </div>
     </AuthGuard>
   );
-} 
+}

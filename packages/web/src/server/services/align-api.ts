@@ -22,12 +22,23 @@ class AlignApiError extends Error {
 export const alignCustomerSchema = z.object({
   customer_id: z.string(),
   email: z.string().email(),
+  first_name: z.string().nullish(),
+  last_name: z.string().nullish(),
+  company_name: z.string().nullish(),
+  beneficiary_type: z.enum(['individual', 'business']).nullish(),
   kycs: z
     .array(
       z.object({
-        status: z.enum(['pending', 'approved', 'rejected']),
-        sub_status: z.enum(['kyc_form_submission_started', 'kyc_form_submission_accepted', 'kyc_form_resubmission_required']).optional().nullable(),
-        kyc_flow_link: z.string().url().optional(),
+        status: z.enum(['pending', 'approved', 'rejected']).nullable(),
+        sub_status: z
+          .enum([
+            'kyc_form_submission_started',
+            'kyc_form_submission_accepted',
+            'kyc_form_resubmission_required',
+          ])
+          .optional()
+          .nullable(),
+        kyc_flow_link: z.string().url().nullable(),
       }),
     )
     .optional()
@@ -58,8 +69,8 @@ const alignVirtualAccountSchema = z.object({
     // Support both naming conventions for backwards compatibility
     beneficiary_name: z.string(),
     beneficiary_address: z.string().optional(),
-    account_beneficiary_name: z.string().optional(),
-    account_beneficiary_address: z.string().optional(),
+    account_beneficiary_name: z.string().nullable().optional(),
+    account_beneficiary_address: z.string().nullable().optional(),
     // Payment rails
     payment_rails: z.array(z.string()).optional(),
     // US ACH specific fields - both direct and nested
@@ -94,9 +105,16 @@ export type AlignVirtualAccount = z.infer<typeof alignVirtualAccountSchema>;
 
 /* ---------- KYC session ---------- */
 const alignKycSessionSchema = z.object({
-  status: z.enum(['pending', 'approved', 'rejected']),
-  sub_status: z.enum(['kyc_form_submission_started', 'kyc_form_submission_accepted', 'kyc_form_resubmission_required']).optional(),
-  kyc_flow_link: z.string().url().optional(),
+  status: z.enum(['pending', 'approved', 'rejected']).nullable(),
+  sub_status: z
+    .enum([
+      'kyc_form_submission_started',
+      'kyc_form_submission_accepted',
+      'kyc_form_resubmission_required',
+    ])
+    .optional()
+    .nullable(),
+  kyc_flow_link: z.string().url().optional().nullable(),
 });
 export type AlignKycSession = z.infer<typeof alignKycSessionSchema>;
 
@@ -272,8 +290,12 @@ const alignOfframpTransferListSchema = z.object({
   items: z.array(alignOfframpTransferListItemSchema),
 });
 
-export type AlignOfframpTransferListItem = z.infer<typeof alignOfframpTransferListItemSchema>;
-export type AlignOfframpTransferList = z.infer<typeof alignOfframpTransferListSchema>;
+export type AlignOfframpTransferListItem = z.infer<
+  typeof alignOfframpTransferListItemSchema
+>;
+export type AlignOfframpTransferList = z.infer<
+  typeof alignOfframpTransferListSchema
+>;
 
 // --- LIST ONRAMP TRANSFERS SCHEMA -----------------------------------------
 const alignOnrampTransferListItemSchema = z.object({
@@ -299,8 +321,12 @@ const alignOnrampTransferListSchema = z.object({
   items: z.array(alignOnrampTransferListItemSchema),
 });
 
-export type AlignOnrampTransferListItem = z.infer<typeof alignOnrampTransferListItemSchema>;
-export type AlignOnrampTransferList = z.infer<typeof alignOnrampTransferListSchema>;
+export type AlignOnrampTransferListItem = z.infer<
+  typeof alignOnrampTransferListItemSchema
+>;
+export type AlignOnrampTransferList = z.infer<
+  typeof alignOnrampTransferListSchema
+>;
 
 /**
  * Client for interacting with the Align API
@@ -308,12 +334,16 @@ export type AlignOnrampTransferList = z.infer<typeof alignOnrampTransferListSche
 class AlignApiClient {
   private readonly baseUrl: string;
   private readonly apiKey: string;
+  private readonly liteMode: boolean;
 
   constructor(apiKey = ALIGN_API_KEY, baseUrl = ALIGN_API_BASE_URL) {
     if (!apiKey) {
-      throw new Error('ALIGN_API_KEY environment variable is required');
+      console.warn('[Align] Running in Lite mode - banking features disabled');
+      this.liteMode = true;
+    } else {
+      this.liteMode = false;
     }
-    this.apiKey = apiKey;
+    this.apiKey = apiKey || '';
     this.baseUrl = baseUrl;
   }
 
@@ -321,23 +351,47 @@ class AlignApiClient {
     endpoint: string,
     options: RequestInit = {},
   ): Promise<any> {
+    // Check if running in lite mode
+    if (this.liteMode) {
+      throw new Error(
+        'Align services not available in Lite mode. Please configure Align credentials to enable banking features.',
+      );
+    }
+
     const url = `${this.baseUrl}${endpoint}`;
     const method = options.method || 'GET';
     const body = options.body ? String(options.body) : ''; // Ensure body is string for hashing
 
-    // --- Record/Replay Logic --- 
+    // Log request details
+    console.log('[Align API Request]', {
+      method,
+      endpoint,
+      url,
+      body: body ? JSON.parse(body) : undefined,
+      timestamp: new Date().toISOString(),
+    });
+
+    // --- Record/Replay Logic ---
     const fixturesDir = path.join(__dirname, '__fixtures__/align-api');
-    const requestHash = crypto.createHash('sha256').update(method + endpoint + body).digest('hex');
+    const requestHash = crypto
+      .createHash('sha256')
+      .update(method + endpoint + body)
+      .digest('hex');
     const fixturePath = path.join(fixturesDir, `${requestHash}.json`);
 
     if (process.env.ALIGN_REPLAY === 'true') {
-      console.log(`[Align API REPLAY] Reading fixture for ${method} ${endpoint}: ${requestHash}.json`);
+      console.log(
+        `[Align API REPLAY] Reading fixture for ${method} ${endpoint}: ${requestHash}.json`,
+      );
       if (fs.existsSync(fixturePath)) {
         try {
           const fixtureData = fs.readFileSync(fixturePath, 'utf-8');
           return JSON.parse(fixtureData);
         } catch (err) {
-          console.error(`[Align API REPLAY] Error reading or parsing fixture ${fixturePath}:`, err);
+          console.error(
+            `[Align API REPLAY] Error reading or parsing fixture ${fixturePath}:`,
+            err,
+          );
           throw new Error(`Failed to read/parse fixture: ${fixturePath}`);
         }
       } else {
@@ -388,16 +442,30 @@ class AlignApiClient {
       // If response is OK, try to parse JSON
       const data = await response.json();
 
-      // --- Record Logic --- 
+      // Log successful response
+      console.log('[Align API Response]', {
+        method,
+        endpoint,
+        status: response.status,
+        data: JSON.stringify(data, null, 2),
+        timestamp: new Date().toISOString(),
+      });
+
+      // --- Record Logic ---
       if (process.env.ALIGN_RECORD === 'true') {
-        console.log(`[Align API RECORD] Saving fixture for ${method} ${endpoint}: ${requestHash}.json`);
+        console.log(
+          `[Align API RECORD] Saving fixture for ${method} ${endpoint}: ${requestHash}.json`,
+        );
         try {
           if (!fs.existsSync(fixturesDir)) {
             fs.mkdirSync(fixturesDir, { recursive: true });
           }
           fs.writeFileSync(fixturePath, JSON.stringify(data, null, 2));
         } catch (err) {
-          console.error(`[Align API RECORD] Error writing fixture ${fixturePath}:`, err);
+          console.error(
+            `[Align API RECORD] Error writing fixture ${fixturePath}:`,
+            err,
+          );
           // Don't throw here, recording failure shouldn't break the app
         }
       }
@@ -430,21 +498,44 @@ class AlignApiClient {
     companyName?: string,
     beneficiaryType: 'individual' | 'corporate' = 'individual',
   ): Promise<AlignCustomer> {
+    console.log('[createCustomer] Input params:', {
+      email,
+      firstName,
+      lastName,
+      companyName,
+      beneficiaryType,
+    });
+
     const payload = {
       email,
-      first_name: firstName,
-      last_name: lastName,
-      company_name: companyName,
+      ...(firstName && { first_name: firstName }),
+      ...(lastName && { last_name: lastName }),
+      ...(companyName && { company_name: companyName }),
       beneficiary_type: beneficiaryType,
     };
-    console.log('payload', payload);
+    console.log(
+      '[createCustomer] Payload to send:',
+      JSON.stringify(payload, null, 2),
+    );
 
     const response = await this.fetchWithAuth('/v0/customers', {
       method: 'POST',
       body: JSON.stringify(payload),
     });
 
-    return alignCustomerSchema.parse(response);
+    console.log(
+      '[createCustomer] Response received:',
+      JSON.stringify(response, null, 2),
+    );
+
+    try {
+      const parsed = alignCustomerSchema.parse(response);
+      console.log('[createCustomer] Successfully parsed customer data');
+      return parsed;
+    } catch (error) {
+      console.error('[createCustomer] Zod parsing error:', error);
+      throw error;
+    }
   }
 
   /**
@@ -452,6 +543,7 @@ class AlignApiClient {
    * This is used for recovery when a customer exists in Align but not in our db
    */
   async searchCustomerByEmail(email: string): Promise<AlignCustomer | null> {
+    console.log('[searchCustomerByEmail] Searching for email:', email);
     try {
       // Using the proper customers endpoint with email query parameter
       const response = await this.fetchWithAuth(
@@ -460,7 +552,10 @@ class AlignApiClient {
           method: 'GET',
         },
       );
-      console.log('response searchCustomerByEmail', response);
+      console.log(
+        '[searchCustomerByEmail] Raw response:',
+        JSON.stringify(response, null, 2),
+      );
 
       // Handle new response format with items array
       if (
@@ -472,18 +567,42 @@ class AlignApiClient {
         // Get the first matching customer from items array
         const customerData = response.items[0];
 
-        // Create a schema-compatible object
-        const alignCustomer = {
-          customer_id: customerData.customer_id,
+        // Create a schema-compatible object, excluding null values
+        const alignCustomer: any = {
+          customer_id: customerData.customer_id || customerData.id,
           email: customerData.email,
-          kycs: [], // Initialize with empty kycs array
-          // Include optional fields if they exist in the API response
-          created_at: customerData.created_at,
-          updated_at: customerData.updated_at,
+          kycs: customerData.kycs || [], // Initialize with empty kycs array if null
         };
 
-        console.log('Found customer by email:', alignCustomer);
-        return alignCustomerSchema.parse(alignCustomer);
+        // Only add optional fields if they have non-null values
+        if (customerData.first_name)
+          alignCustomer.first_name = customerData.first_name;
+        if (customerData.last_name)
+          alignCustomer.last_name = customerData.last_name;
+        if (customerData.company_name)
+          alignCustomer.company_name = customerData.company_name;
+        if (customerData.beneficiary_type)
+          alignCustomer.beneficiary_type = customerData.beneficiary_type;
+        if (customerData.created_at)
+          alignCustomer.created_at = customerData.created_at;
+        if (customerData.updated_at)
+          alignCustomer.updated_at = customerData.updated_at;
+
+        console.log(
+          '[searchCustomerByEmail] Constructed customer object:',
+          JSON.stringify(alignCustomer, null, 2),
+        );
+
+        try {
+          const parsed = alignCustomerSchema.parse(alignCustomer);
+          console.log(
+            '[searchCustomerByEmail] Successfully parsed customer data',
+          );
+          return parsed;
+        } catch (error) {
+          console.error('[searchCustomerByEmail] Zod parsing error:', error);
+          throw error;
+        }
       } else if (Array.isArray(response) && response.length > 0) {
         // Fallback for older API format (direct array)
         return alignCustomerSchema.parse(response[0]);
@@ -504,19 +623,49 @@ class AlignApiClient {
    * Get customer details from Align
    */
   async getCustomer(customerId: string): Promise<AlignCustomer> {
+    console.log('[getCustomer] Fetching customer:', customerId);
     const response = await this.fetchWithAuth(`/v0/customers/${customerId}`);
+
+    console.log(
+      '[getCustomer] Raw response:',
+      JSON.stringify(response, null, 2),
+    );
 
     // Handle case where kycs is an object instead of an array
     if (response && response.kycs && !Array.isArray(response.kycs)) {
+      console.log('[getCustomer] Converting kycs object to array');
       // Transform the object into an array with one item
       const transformedResponse = {
         ...response,
         kycs: [response.kycs],
       };
-      return alignCustomerSchema.parse(transformedResponse);
+
+      console.log(
+        '[getCustomer] Before parsing:',
+        JSON.stringify(transformedResponse, null, 2),
+      );
+      try {
+        const parsed = alignCustomerSchema.parse(transformedResponse);
+        console.log('[getCustomer] Successfully parsed customer data');
+        return parsed;
+      } catch (error) {
+        console.error('[getCustomer] Zod parsing error:', error);
+        throw error;
+      }
     }
 
-    return alignCustomerSchema.parse(response);
+    console.log(
+      '[getCustomer] Before parsing (no transformation):',
+      JSON.stringify(response, null, 2),
+    );
+    try {
+      const parsed = alignCustomerSchema.parse(response);
+      console.log('[getCustomer] Successfully parsed customer data');
+      return parsed;
+    } catch (error) {
+      console.error('[getCustomer] Zod parsing error:', error);
+      throw error;
+    }
   }
 
   /**
@@ -524,7 +673,7 @@ class AlignApiClient {
    */
   async getRawCustomer(customerId: string): Promise<any> {
     const response = await this.fetchWithAuth(`/v0/customers/${customerId}`);
-    
+
     // Handle case where kycs is an object instead of an array
     if (response && response.kycs && !Array.isArray(response.kycs)) {
       // Transform the object into an array with one item
@@ -708,6 +857,24 @@ class AlignApiClient {
     }
   }
 
+  /**
+   * List all virtual accounts for a customer
+   */
+  async listVirtualAccounts(
+    customerId: string,
+  ): Promise<{ items: AlignVirtualAccount[] }> {
+    const response = await this.fetchWithAuth(
+      `/v0/customers/${customerId}/virtual-account`,
+    );
+
+    console.log(
+      'Raw Align API response for listVirtualAccounts:',
+      JSON.stringify(response, null, 2),
+    );
+
+    return response;
+  }
+
   // --- METHODS FOR OFFRAMP TRANSFERS ---
 
   /**
@@ -823,6 +990,30 @@ class AlignApiClient {
   }
 
   /**
+   * Create an onramp transfer request
+   */
+  async createOnrampTransfer(
+    customerId: string,
+    params: {
+      amount: string;
+      source_currency: 'usd' | 'eur';
+      source_rails: 'swift' | 'ach' | 'sepa' | 'wire';
+      destination_network: 'polygon' | 'ethereum' | 'tron' | 'solana';
+      destination_token: 'usdc' | 'usdt';
+      destination_address: string;
+    },
+  ): Promise<any> {
+    const response = await this.fetchWithAuth(
+      `/v0/customers/${customerId}/onramp-transfer`,
+      {
+        method: 'POST',
+        body: JSON.stringify(params),
+      },
+    );
+    return response;
+  }
+
+  /**
    * Get all onramp transfers for a customer – supports limit & skip params.
    * Docs: GET /v0/customers/{customer_id}/onramp-transfer
    */
@@ -833,7 +1024,7 @@ class AlignApiClient {
     const query: string[] = [];
     if (params?.limit !== undefined) query.push(`limit=${params.limit}`);
     if (params?.skip !== undefined) query.push(`skip=${params.skip}`);
-    const qs = query.length ? `?${query.join("&")}` : "";
+    const qs = query.length ? `?${query.join('&')}` : '';
 
     const response = await this.fetchWithAuth(
       `/v0/customers/${customerId}/onramp-transfer${qs}`,
